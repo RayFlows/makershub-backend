@@ -79,7 +79,6 @@ class AuthMiddleware:
         "/users/test-user"
     }
 
-
     @classmethod
     async def get_current_user(cls, token: str = Header(..., alias="Authorization")) -> User:
         """
