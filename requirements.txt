@@ -1,0 +1,59 @@
+# requirements.txt
+
+# Web Framework
+fastapi==0.95.0
+uvicorn[standard]==0.21.1
+starlette==0.26.1
+
+# Database
+motor==3.1.1
+mongoengine==0.27.0
+pymongo[srv]==4.5.0  # MongoDB URI支持
+dnspython==2.4.2     # MongoDB DNS解析
+
+# Storage
+minio==7.1.17
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+PyJWT==2.7.0
+
+# Utils
+pydantic==1.10.7
+python-dotenv==1.0.0
+loguru==0.7.0
+aiohttp==3.8.4
+jinja2==3.1.2
+pytz==2023.3
+python-dateutil==2.8.2
+requests==2.31.0     # HTTP请求
+
+# Testing
+pytest==7.3.1
+pytest-asyncio==0.21.0
+pytest-cov==4.0.0
+httpx==0.24.1
+
+# Development Tools
+black==23.3.0
+isort==5.12.0
+flake8==6.0.0
+pre-commit==3.2.2
+
+# API Documentation
+swagger-ui-bundle==0.0.9
+
+# Email Support
+aiosmtplib==2.0.1
+
+# Image Processing
+Pillow==9.5.0
+
+# Excel Support
+openpyxl==3.1.2
+xlsxwriter==3.1.0
+
+# Performance Monitoring
+prometheus-client==0.16.0

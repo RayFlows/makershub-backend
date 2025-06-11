@@ -1,0 +1,92 @@
+#docker-compose.yml
+services:
+  backend:
+    build: .
+    container_name: makerhub-backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      # - ./docker-entrypoint-init.d/images:/docker-entrypoint-init.d/images  # 添加，原因：init.sh 需要图片目录
+      - ./assets/default-images:/docker-entrypoint-init.d/images # 添加，原因：init.sh 需要图片目录
+      - ./app:/app/app  # 开发环境热重载
+      - ./logs:/app/logs  # 日志持久化
+    depends_on:
+      mongo:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - makerhub-network
+
+  mongo:
+    image: mongo:5.0
+    container_name: makerhub-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - makerhub-network
+
+  minio:
+    image: minio/minio
+    container_name: makerhub-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      # MINIO_BROWSER_REDIRECT_URL: http://localhost:9001  # 添加这行
+      MINIO_BROWSER_REDIRECT_URL: http://146.56.227.73:9001  # 修改，原因：替换为实际服务器 IP
+    ports:
+      - "9000:9000"  # API Port
+      - "9001:9001"  # Console Port
+    restart: unless-stopped
+    command: server /data --console-address ":9001" --address ":9000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - makerhub-network
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./docker/minio/init.sh:/usr/bin/init.sh
+      - ./assets/default-images:/docker-entrypoint-init.d/images
+      - /etc/localtime:/etc/localtime:ro
+    entrypoint: ["/bin/sh", "/usr/bin/init.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    networks:
+      - makerhub-network
+
+
+networks:
+  makerhub-network:
+    driver: bridge
+
+
