@@ -166,30 +166,55 @@ def require_permission_level(required_level: int):
         一个依赖函数，用于检查用户权限
     """
     
+    # async def check_permission_level(
+    #     auth_level: int = Depends(AuthMiddleware.get_current_user)
+    # ):
+    #     """
+    #     检查用户权限等级
+        
+    #     依赖函数，检查当前认证用户的权限等级是否满足要求。
+        
+    #     Args:
+    #         auth_level: 通过AuthMiddleware获取的当前用户对象
+            
+    #     Returns:
+    #         通过验证的用户对象
+            
+    #     Raises:
+    #         HTTPException: 权限不足时抛出403异常
+    #     """
+    #     if auth_level.level < required_level:
+    #         # 用户权限等级不足，拒绝访问
+    #         logger.warning(f"⛔ 权限不足 | 用户: {current_user.userid} | 当前权限: {current_user.level} | 要求权限: {required_level}")
+    #         raise HTTPException(
+    #             status_code=403,
+    #             detail=f"需要权限等级 {required_level}, 当前等级 {auth_level.level}"
+    #         )
+    #     logger.info(f"✅ 权限验证通过 | 用户: {current_user.userid}")
+    #     return auth_level
+    # return check_permission_level
     async def check_permission_level(
-        auth_level: int = Depends(AuthMiddleware.get_current_user)
+        user: User = Depends(AuthMiddleware.get_current_user)  # 重命名参数为 user
     ):
-        """
-        检查用户权限等级
+        # 确保用户对象有效
+        if not user or not hasattr(user, 'role'):
+            logger.error("❌ 无效的用户对象")
+            raise HTTPException(status_code=401, detail="用户信息异常")
         
-        依赖函数，检查当前认证用户的权限等级是否满足要求。
-        
-        Args:
-            auth_level: 通过AuthMiddleware获取的当前用户对象
-            
-        Returns:
-            通过验证的用户对象
-            
-        Raises:
-            HTTPException: 权限不足时抛出403异常
-        """
-        if auth_level.level < required_level:
-            # 用户权限等级不足，拒绝访问
+        # 检查权限等级
+        if user.role < required_level:  # 使用正确的变量名 user
+            logger.warning(
+                f"⛔ 权限不足 | 用户: {user.userid} | "
+                f"当前权限: {user.role} | 要求权限: {required_level}"
+            )
             raise HTTPException(
                 status_code=403,
-                detail=f"需要权限等级 {required_level}, 当前等级 {auth_level.level}"
+                detail=f"需要权限等级 {required_level}, 当前等级 {user.role}"
             )
-        return auth_level
+            
+        logger.info(f"✅ 权限验证通过 | 用户: {user.userid}")
+        return user  # 返回验证通过的用户对象
+        
     return check_permission_level
 
 # 便捷的权限检查装饰器，用于常用权限等级

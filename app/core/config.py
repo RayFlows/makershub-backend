@@ -55,6 +55,9 @@ class Settings(pydantic.ConfigDict):
     WECHAT_SECRET = "24b2a16a5981149b0287334beed24e88"
     WECHAT_LOGIN_URL = "https://api.weixin.qq.com/sns/jscode2session"
 
+    # 新添加的事件过期时间设置
+    EVENT_PURGE_TIMEOUT: int = 5  # 分钟
+
     class Config:
         case_sensitive = True
 

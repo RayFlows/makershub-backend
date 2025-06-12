@@ -25,7 +25,9 @@ from app.core.config import settings  # 应用配置
 from app.core.logging import setup_logging  # 日志配置
 from app.core.auth import AuthMiddleware  # 自定义认证中间件
 import json
-from app.routes import user_router, duty_apply_router, event_router # 导入API路由模块
+from app.routes import user_router, duty_apply_router, event_router, stuff_borrow_router # 导入API路由模块
+from app.services.event_service import EventService
+import asyncio
 # 初始化FastAPI应用
 
 app = FastAPI(
@@ -84,7 +86,26 @@ async def log_requests(request: Request, call_next):
             logger.warning(f"Invalid JSON body for {request.method} {request.url.path}: {e}")
     # 对于文件上传请求，只记录是文件上传，不尝试解析内容
     elif "multipart/form-data" in content_type:
-        request_body = {"message": "File upload request (body not logged)"}
+        # request_body = {"message": "File upload request (body not logged)"}
+        try:
+            # 1. 读取并保留原始请求体
+            body = await request.body()
+            
+            # 2. 重置接收函数 (关键修复)
+            async def receive():
+                return {"type": "http.request", "body": body}
+            request._receive = receive
+            
+            # 3. 记录元数据而非实际内容
+            request_body = {
+                "content_type": content_type,
+                "file_size": len(body),
+                "message": "File upload request (content not logged)"
+            }
+            logger.debug(f"文件上传请求 | 大小: {len(body)}字节")  # 新增调试日志
+        except Exception as e:
+            request_body = {"error": f"File read error: {str(e)}"}
+            logger.error(f"文件读取失败: {str(e)}")
 
     # 记录请求信息
     logger.info(
@@ -145,7 +166,10 @@ async def startup_event():
     """
     setup_logging()  # 配置日志系统
     connect_to_mongodb()  # 连接MongoDB
-    logger.info("应用启动 - 已连接到MongoDB")
+    # 启动后台清理任务
+    asyncio.create_task(cleanup_incomplete_events_task())
+    logger.info("应用启动 - 已连接到MongoDB并启动清理任务")
+    # logger.info("应用启动 - 已连接到MongoDB")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -177,7 +201,12 @@ app.include_router(
     prefix="/events",     # 路由前缀
     tags=["活动管理"]    # API文档分类标签
 )
-
+# 注册借物申请路由
+app.include_router(
+    stuff_borrow_router.router, 
+    prefix="/borrow", 
+    tags=["借物申请"]
+)
 # #健康检查端点：用于监控系统确认API是否正常运行
 @app.get("/health")
 async def health_check():
@@ -214,3 +243,21 @@ if __name__ == "__main__":
         reload=settings.DEBUG,     # 是否启用热重载，生产环境应禁用
         workers=settings.WORKERS   # 工作进程数，影响并发处理能力
     )
+
+# 添加后台任务函数
+async def cleanup_incomplete_events_task():
+    """定期清理未完成的事件任务"""
+    event_service = EventService()
+    while True:
+        try:
+            # 每5分钟执行一次清理
+            result = await event_service.cleanup_incomplete_events()
+            if "cleaned" in result:
+                logger.info(f"清理未完成事件: {result['cleaned']}个")
+            elif "error" in result:
+                logger.error(f"清理任务出错: {result['error']}")
+        except Exception as e:
+            logger.error(f"清理任务异常: {str(e)}")
+        
+        # 等待5分钟
+        await asyncio.sleep(300)  # 300秒 = 5分钟

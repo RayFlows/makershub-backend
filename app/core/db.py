@@ -16,6 +16,7 @@ from app.core.config import settings
 from loguru import logger
 from typing import Union
 from datetime import timedelta
+from io import BytesIO
 
 def connect_to_mongodb():
     """
@@ -181,15 +182,30 @@ class MinioClient:
         try:
             # 获取对应的存储桶名称
             bucket = self.buckets.get(bucket_type, self.buckets["AVATARS"])
-            
+            logger.info(f"上传文件 | 文件路径: {file_path} | 桶类型: {bucket_type} | 实际桶名: {bucket}")
+
+            # 修复：正确处理bytes和BytesIO类型
+            if isinstance(file_data, bytes):
+                length = len(file_data)
+                data_stream = BytesIO(file_data)
+            else:
+                # BytesIO对象
+                file_data.seek(0, 2)  # 移动到文件末尾
+                length = file_data.tell()
+                file_data.seek(0)  # 重置指针
+                data_stream = file_data
+
             # 上传文件
             self.client.put_object(
                 bucket,
                 file_path,
-                file_data,
-                length=len(file_data),
+                # file_data,
+                data_stream,
+                # length=len(file_data),
+                length=length,
                 content_type=content_type
             )
+
             return True
         except Exception as e:
             logger.error(f"上传文件失败: {str(e)}")

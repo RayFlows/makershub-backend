@@ -31,4 +31,12 @@ def get_week_start_end(dt: datetime = None) -> tuple[datetime, datetime]:
     end = start + timedelta(days=6)  # 计算周结束日期
     return start.replace(hour=0, minute=0, second=0), end.replace(hour=23, minute=59, second=59)  # 返回周开始和结束时间
 
+# 添加时间解析函数
+def parse_datetime(date_str: str, format_str: str = "%Y-%m-%dT%H:%M:%SZ") -> Optional[datetime]:
+    """解析ISO 8601格式的时间字符串"""
+    try:
+        return datetime.strptime(date_str, format_str)
+    except (ValueError, TypeError):
+        return None
+
 # 这里可以添加其他通用工具函数

@@ -47,7 +47,7 @@ def setup_logging():
         rotation="00:00",  # 每天午夜轮转
         retention="7 days",  
         compression="zip",
-        level="INFO",
+        level="DEBUG",
         encoding="utf-8",
         enqueue=True,  # 避免文件锁问题
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}"
