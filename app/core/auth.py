@@ -76,7 +76,7 @@ class AuthMiddleware:
         "/health",          # 健康检查
         "/favicon.ico",     # 网站图标
         "/",                 # 根路径
-        "/users/test-user", # 测试用户接口
+        "/users/test-user", # 测试用户接口（临时）
         "/site/add",       # 添加场地接口（临时）
     }
 
@@ -99,13 +99,20 @@ class AuthMiddleware:
         try:
             # 如果是Bearer格式，提取实际令牌部分
             if token.startswith("Bearer "):
+                logger.debug("Token starts with 'Bearer', extracting actual token part.")
                 token = token.split(" ")[1]
+            else:
+                logger.debug("Token does not start with 'Bearer', using as is.")
             # 解码令牌获取用户ID
+            logger.debug(f"Decoding token: {token}")
             userid = decode_token(token)
+            logger.debug(f"Decoded user ID: {userid}")
             # 根据用户ID查询用户信息
+            logger.debug(f"Querying user with ID: {userid}")
             user = User.objects(userid=userid).first()
             if not user:
                 # 用户不存在，可能是令牌伪造或用户已被删除
+                logger.debug("User not found, raising 404 exception.")
                 raise HTTPException(status_code=404, detail="User not found")
             return user
         except Exception as e:

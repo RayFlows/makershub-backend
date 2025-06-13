@@ -1,3 +1,4 @@
+#site_service.py
 from app.models.site import Site
 from loguru import logger
 from fastapi import HTTPException
@@ -71,12 +72,13 @@ class SiteService:
             
             # 转换为列表格式
             site_list = list(sites.values())
-            
+            logger.info(f"获取场地信息成功 | 场地 {site_list}")
             return {
                 "code": 200,
                 "message": "successfully get all sites",
                 "sites": site_list
             }
+
         except Exception as e:
             logger.error(f"获取场地信息失败: {str(e)}")
             raise HTTPException(status_code=500, detail="获取场地信息失败")

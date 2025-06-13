@@ -24,9 +24,17 @@ from app.core.db import connect_to_mongodb, disconnect_from_mongodb  # 数据库
 from app.core.config import settings  # 应用配置
 from app.core.logging import setup_logging  # 日志配置
 from app.core.auth import AuthMiddleware  # 自定义认证中间件
-import json
-from app.routes import user_router, duty_apply_router, event_router, stuff_borrow_router, site_router  # 导入API路由模块
 from app.services.event_service import EventService
+import json
+from app.routes import (
+    user_router, 
+    duty_apply_router, 
+    event_router, 
+    stuff_borrow_router, 
+    site_router,
+    site_borrow_router
+     # 导入各个模块的路由
+)
 import asyncio
 # 初始化FastAPI应用
 
@@ -214,6 +222,13 @@ app.include_router(
     site_router.router,
     prefix="/site",
     tags=["场地管理"]
+)
+
+# 注册场地借用申请路由
+app.include_router(
+    site_borrow_router.router,
+    prefix="/sites-borrow",
+    tags=["场地借用申请"]
 )
 
 # #健康检查端点：用于监控系统确认API是否正常运行
