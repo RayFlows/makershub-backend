@@ -95,6 +95,90 @@ class EventService:
         except Exception as e:
             logger.error(f"更新事件失败: {str(e)}")
             raise HTTPException(status_code=500, detail="更新事件失败")
+
+    async def get_upcoming_events(self, current_time: str) -> list:
+        """
+        获取未开展的所有活动
+        
+        未开展指的是活动的开始时间(start_time)晚于当前时间
+        
+        Args:
+            current_time: 当前时间(ISO 8601格式)
+            
+        Returns:
+            list: 包含活动信息的列表
+        """
+        try:
+            logger.info(f"查询未开展活动 | 当前时间: {current_time}")
+            
+            # 查询条件：活动已标记完成(is_completed=1)且开始时间大于当前时间
+            events = Event.objects(
+                is_completed=1,
+                start_time__gt=current_time
+            ).only(
+                "event_id", 
+                "event_name", 
+                "poster", 
+                "start_time"
+            )
+            
+            # 转换为字典列表
+            event_list = []
+            for event in events:
+                event_list.append({
+                    "event_id": event.event_id,
+                    "event_name": event.event_name,
+                    "poster": event.poster,
+                    "start_time": event.start_time
+                })
+            
+            logger.info(f"找到 {len(event_list)} 个未开展活动")
+            return event_list
+        except Exception as e:
+            logger.error(f"查询未开展活动失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="查询活动失败")
+
+    # 获取活动详情的方法
+    async def get_event_details(self, event_id: str) -> dict:
+        """
+        获取特定活动的详情
+        
+        Args:
+            event_id: 活动ID
+            
+        Returns:
+            dict: 包含活动详情的字典，如果活动不存在则返回None
+        """
+        try:
+            logger.info(f"查询活动详情 | 活动ID: {event_id}")
+            
+            # 查询活动记录
+            event = Event.objects(event_id=event_id).first()
+            
+            # 如果活动不存在，返回None
+            if not event:
+                logger.warning(f"活动不存在 | 活动ID: {event_id}")
+                return None
+            
+            # 转换为字典并返回
+            event_dict = {
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "poster": event.poster,
+                "description": event.description,
+                "participant": event.participant,
+                "location": event.location,
+                "link": event.link,
+                "start_time": event.start_time,
+                "end_time": event.end_time,
+                "registration_deadline": event.registration_deadline
+            }
+            
+            logger.info(f"成功获取活动详情 | 活动ID: {event_id}")
+            return event_dict
+        except Exception as e:
+            logger.error(f"查询活动详情失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="查询活动详情失败")
     
     async def cleanup_incomplete_events(self):
         """清理未完成的事件（5分钟未完成）"""

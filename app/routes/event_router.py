@@ -7,6 +7,7 @@ from app.core.utils import parse_datetime
 from loguru import logger
 import asyncio
 from datetime import datetime
+import re
 
 router = APIRouter()
 event_service = EventService()
@@ -99,3 +100,79 @@ async def upload_poster(
     except Exception as e:
         logger.error(f"上传海报失败: {str(e)}")
         raise HTTPException(status_code=500, detail="上传海报失败")
+
+# 获取未开展活动列表
+@router.get("/view")
+async def get_upcoming_events(
+    user: dict = Depends(require_permission_level(0))  # 允许权限0,1,2
+):
+    """
+    获取未开展的所有活动列表
+    
+    未开展指的是活动的开始时间(start_time)晚于当前时间
+    """
+    try:
+        # 获取当前UTC时间
+        current_time = datetime.utcnow().isoformat() + "Z"
+        logger.info(f"获取未开展活动列表 | 当前时间: {current_time}")
+        
+        # 调用服务层获取活动列表
+        events = await event_service.get_upcoming_events(current_time)
+        
+        return {
+            "code": 200,
+            "message": "successfully get event-list",
+            "data": {
+                "total": len(events),
+                "events": events
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取活动列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取活动列表失败")
+
+# 获取特定活动详情
+@router.get("/details/{event_id}")
+async def get_event_details(
+    event_id: str,
+    user: dict = Depends(require_permission_level(0))  # 允许权限0,1,2
+):
+    """
+    获取特定活动的详情
+    
+    Args:
+        event_id: 活动ID，格式为EV开头加时间戳
+        
+    Returns:
+        活动详情信息
+    """
+    try:
+        # 验证event_id格式
+        if not re.match(r'^EV\d+_\d{3}$', event_id):
+            return {
+                "code": 400,
+                "message": "wrong event_id format",
+                "data": {
+                    "target": "request.params.event_id",
+                    "expected": "EV%Y%M%D%hh%mmxxx",
+                    "actual": event_id
+                }
+            }
+        
+        # 调用服务层获取活动详情
+        event = await event_service.get_event_details(event_id)
+        
+        if not event:
+            return {
+                "code": 404,
+                "message": "record does not exist"
+            }
+        
+        return {
+            "code": 200,
+            "message": "successfully get event-detail",
+            "data": event
+        }
+    except Exception as e:
+        logger.error(f"获取活动详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取活动详情失败")

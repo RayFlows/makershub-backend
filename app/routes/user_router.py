@@ -347,7 +347,3 @@ async def upload_profile_photo(
             "code": 400,
             "message": "upload failed"
         }
-
-
-
-    
