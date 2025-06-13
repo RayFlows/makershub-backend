@@ -36,9 +36,9 @@ class Settings(pydantic.ConfigDict):
 
     # 权限等级定义
     PERMISSION_LEVELS = {
-        "USER": 0,      # 普通用户
-        "ADMIN": 1,     # 管理员
-        "SUPER": 2      # 超级管理员
+        "USER": 0,      # 外部用户
+        "ADMIN": 1,     # 协会成员
+        "SUPER": 2     # 协会管理员
     }
 
     # 应用设置

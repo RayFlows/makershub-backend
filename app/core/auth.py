@@ -218,5 +218,5 @@ def require_permission_level(required_level: int):
     return check_permission_level
 
 # 便捷的权限检查装饰器，用于常用权限等级
-require_admin = require_permission_level(settings.PERMISSION_LEVELS["ADMIN"])  # 管理员权限
-require_super = require_permission_level(settings.PERMISSION_LEVELS["SUPER"])  # 超级管理员权限
+require_admin = require_permission_level(settings.PERMISSION_LEVELS["ADMIN"])  # 协会成员权限
+require_super = require_permission_level(settings.PERMISSION_LEVELS["SUPER"])  # 协会管理员权限

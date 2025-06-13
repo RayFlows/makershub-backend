@@ -56,8 +56,8 @@ docker-compose ps
 # 停止服务
 docker-compose down
 
-#实时监控状态
-tail -f logs/*.log | ccze -A
+#实时跟踪监控状态
+tail -F logs/*.log | ccze -A
 ```
 
 服务启动后访问：
