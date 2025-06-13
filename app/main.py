@@ -25,7 +25,7 @@ from app.core.config import settings  # 应用配置
 from app.core.logging import setup_logging  # 日志配置
 from app.core.auth import AuthMiddleware  # 自定义认证中间件
 import json
-from app.routes import user_router, duty_apply_router, event_router, stuff_borrow_router # 导入API路由模块
+from app.routes import user_router, duty_apply_router, event_router, stuff_borrow_router, site_router  # 导入API路由模块
 from app.services.event_service import EventService
 import asyncio
 # 初始化FastAPI应用
@@ -201,12 +201,21 @@ app.include_router(
     prefix="/events",     # 路由前缀
     tags=["活动管理"]    # API文档分类标签
 )
+
 # 注册借物申请路由
 app.include_router(
     stuff_borrow_router.router, 
     prefix="/borrow", 
     tags=["借物申请"]
 )
+
+# 注册场地路由
+app.include_router(
+    site_router.router,
+    prefix="/site",
+    tags=["场地管理"]
+)
+
 # #健康检查端点：用于监控系统确认API是否正常运行
 @app.get("/health")
 async def health_check():
