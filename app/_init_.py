@@ -15,7 +15,7 @@ from app.routes import (
     duty_apply_router,
     duty_record_router,
     event_router,
-    publicity_router,
+    publicity_link_router,
     site_borrow_router,
     stuff_router,
     task_router,
