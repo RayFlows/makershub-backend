@@ -30,9 +30,15 @@ class User(BaseModel):
     
     # 使用微信openid作为用户唯一标识
     userid = StringField(required=True, unique=True)
+
+    # 协会ID，分配给用户的协会标识符
+    maker_id = StringField()  
     
     # 用户权限级别: 0=普通用户, 1=干事(默认), 2=部长及以上
     role = IntField(default=1)
+
+    # 用户所属部门，默认为未分配
+    department = StringField(default="未分配")
     
     # 用户真实姓名(可选)
     real_name = StringField(default="猫猫")
@@ -55,6 +61,9 @@ class User(BaseModel):
     # 总值班时长，单位分钟
     total_dutytime = IntField(default=0) 
 
+
+
+
     # MongoDB集合配置和索引定义
     meta = {
         'collection': 'users',  # 指定MongoDB集合名称
@@ -63,7 +72,9 @@ class User(BaseModel):
             'phone_num',  # 索引电话号码
             'real_name',  # 索引真实姓名
             'role',      # 索引用户级别，便于权限筛选
-            'state'       # 索引用户状态，便于状态筛选
+            'state',       # 索引用户状态，便于状态筛选
+            'department',  # 索引部门，便于部门筛选
+            "maker_id" 
         ]
     }
     
@@ -79,7 +90,9 @@ class User(BaseModel):
         """
         return {
             "userid": self.userid,
+            "maker_id": self.maker_id,
             "role": self.role,
+            "department": self.department,
             "real_name": self.real_name,
             "phone_num": self.phone_num,
             "motto": self.motto,

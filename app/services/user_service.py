@@ -7,6 +7,8 @@ import uuid
 from io import BytesIO
 from app.core.config import settings
 from app.core.db import minio_client
+from datetime import datetime
+import random
 
 class UserService:
     """
@@ -43,14 +45,21 @@ class UserService:
                 # 用户不存在，创建新用户
                 logger.info(f"创建新用户: {openid}")
 
+                # 生成唯一的maker_id (格式: MK + 年月日时分秒毫秒 + 随机数)
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # 精确到毫秒
+                random_suffix = str(random.randint(100, 999))  # 3位随机数
+                maker_id = f"MK{timestamp}_{random_suffix}"
+
                 default_avatar = "default-profile-photo.jpg"  # 默认头像文件名
                 
                 user = User(
                     userid=openid,
+                    maker_id=maker_id,  # 使用生成的唯一maker_id
                     real_name="",  # 初始化为空字符串
                     state=1,       # 1表示正常状态
                     score=0,       # 初始积分为0
                     role=1,        # 初始用户级别为1
+                    department="未分配",  # 初始部门为未分配
                     profile_photo=default_avatar,  # 初始化头像链接为空
                     phone_num="",  # 初始化手机号为空
                     motto="",       # 初始化个性签名为空

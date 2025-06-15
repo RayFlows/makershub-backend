@@ -32,7 +32,7 @@ from app.routes import (
     duty_apply_router,
     duty_record_router,
     event_router,
-    publicity_link_router,
+    # publicity_link_router,
     site_borrow_router,
     site_router,
     stuff_router, 
@@ -218,7 +218,7 @@ app.include_router(
 # 注册借物申请路由
 app.include_router(
     stuff_borrow_router.router, 
-    prefix="/borrow", 
+    prefix="/stuff-borrow", 
     tags=["借物申请"]
 )
 

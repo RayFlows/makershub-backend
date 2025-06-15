@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, File, UploadFile, Depends
 from loguru import logger  # 引入高级日志记录器，用于详细记录API调用情况
 from app.services.user_service import UserService  # 引入用户服务层处理业务逻辑
 from app.core.config import settings  # 导入应用配置，包含微信相关密钥
-from app.core.auth import AuthMiddleware  # 导入认证中间件获取当前用户
+from app.core.auth import AuthMiddleware, require_permission_level  # 导入认证中间件获取当前用户
 from app.models.user import User  # 导入用户模型
 import aiohttp  # 异步HTTP客户端库，用于非阻塞网络请求
 from aiohttp import TCPConnector, ClientTimeout  # TCP连接器和超时控制组件
@@ -262,12 +262,6 @@ async def update_user_profile(
         # 调试：验证更新是否生效
         logger.info(f"更新后用户信息: {current_user.to_dict()}")
 
-        # 返回成功响应
-        # return {
-        #     "code": 200,
-        #     "message": "successfully update user profile",
-        #     "data": update_data
-        # }
         return {
             "code": 200,
             "message": "用户资料更新成功",
@@ -307,17 +301,6 @@ async def upload_profile_photo(
         contents = await file.read()
         file_size = len(contents)
         logger.info(f"文件大小: {file_size} 字节")
-
-
-        # # 检查用户状态
-        # if current_user.state != 1:
-        #     return {
-        #         "code": 403,
-        #         "message": "forbidden user"
-        #     }
-            
-        # # 读取文件内容
-        # contents = await file.read()
         
         # 调用用户服务上传头像
         result = await user_service.update_user_profile_photo(current_user.userid, contents)
@@ -347,3 +330,48 @@ async def upload_profile_photo(
             "code": 400,
             "message": "upload failed"
         }
+
+@router.get("/get-makers")
+async def get_all_makers(
+    user: dict = Depends(require_permission_level(2))
+    ):
+    """
+    获取全部协会成员及编号
+    
+    返回所有状态正常且角色为干事(1)或部长及以上(2)的协会成员列表
+    每个成员包含真实姓名和协会ID(maker_id)
+    
+    Returns:
+        dict: 包含成员列表的响应
+    """
+    try:
+        # 查询所有状态正常(1)且角色为干事(1)或部长及以上(2)的用户
+        makers = User.objects(
+            state=1,  # 状态正常
+            role__in=[1, 2]  # 干事或部长及以上
+        ).only('real_name', 'maker_id')  # 只查询需要的字段
+        
+        # 构建响应数据
+        makers_list = [
+            {
+                "name": maker.real_name,
+                "maker_id": maker.maker_id
+            }
+            for maker in makers
+        ]
+        
+        return {
+            "code": 200,
+            "message": "successfully get all makers",
+            "list": makers_list
+        }
+    
+    except Exception as e:
+        logger.error(f"获取协会成员列表失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": 500,
+                "message": "获取协会成员列表失败"
+            }
+        )
