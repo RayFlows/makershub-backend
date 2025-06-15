@@ -3,6 +3,7 @@ from app.services.site_borrow_service import SiteBorrowService
 from app.core.auth import require_permission_level#, get_current_user
 from loguru import logger
 from pydantic import BaseModel
+from typing import Optional
 
 router = APIRouter()
 # site_borrow_service = SiteBorrowService()
@@ -241,3 +242,80 @@ async def review_site_borrow_application(
     except Exception as e:
         logger.error(f"发布审核结果失败: {str(e)}")
         raise HTTPException(status_code=500, detail="review site-application failed")
+
+# 定义更新请求模型
+class UpdateRequest(BaseModel):
+    email: Optional[str] = None
+    end_time: Optional[str] = None
+    mentor_name: Optional[str] = None
+    mentor_phone_num: Optional[str] = None
+    name: Optional[str] = None
+    number: Optional[int] = None
+    phone_num: Optional[str] = None
+    project_id: Optional[str] = None
+    purpose: Optional[str] = None
+    site: Optional[str] = None
+    start_time: Optional[str] = None
+    student_id: Optional[str] = None
+
+# 更新用户场地申请
+@router.patch("/update/{apply_id}")
+async def update_site_borrow_application(
+    apply_id: str,
+    update_data: UpdateRequest,
+    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
+    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
+):
+    """
+    更新场地借用申请
+    
+    用户只能更新自己状态为0（未审核）或1（打回）的申请。
+    支持部分字段更新。
+    """
+    try:
+        logger.info(f"更新场地申请 | 申请ID: {apply_id} | 用户: {user.userid}")
+        
+        # 转换为字典并移除空值
+        update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+        
+        if not update_dict:
+            logger.warning("没有提供更新字段")
+            raise HTTPException(
+                status_code=400,
+                detail="no fields provided for update"
+            )
+        
+        # 调用服务层更新申请
+        result = await site_borrow_service.update_application(
+            apply_id, 
+            user.userid,
+            update_dict
+        )
+        
+        # 提取实际更新的字段名
+        changed_fields = {k: v["new"] for k, v in result[1].items()}
+        
+        return {
+            "code": 200,
+            "message": "successfully update new application",
+            "data": {
+                "apply_id": result[0],
+                "changed": changed_fields
+            }
+        }
+    except HTTPException as he:
+        # 处理400错误的特殊返回格式
+        if he.status_code == 400 and hasattr(he, 'data'):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "code": 400,
+                    "message": he.detail,
+                    "data": he.data
+                }
+            )
+        # 处理其他HTTP异常
+        raise he
+    except Exception as e:
+        logger.error(f"更新场地申请失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="update site-application failed")

@@ -21,6 +21,7 @@ class StuffBorrow(BaseModel):
         borrow_id: 借物申请唯一标识符
         task_name: 任务名称/申请标题
         name: 申请人姓名
+        student_id: 学生ID 
         phone: 联系电话
         email: 邮箱地址
         grade: 年级
@@ -42,11 +43,14 @@ class StuffBorrow(BaseModel):
     # 借物申请唯一标识符，格式：BR + 时间戳
     borrow_id = StringField(required=True, unique=True)
     
-    # 任务名称/申请标题
-    task_name = StringField(required=True, max_length=200)
+    # # 任务名称/申请标题
+    # task_name = StringField(required=True, max_length=200)
     
     # 申请人姓名
     name = StringField(required=True, max_length=100)
+
+    # 学生ID，通常为学号
+    student_id = StringField(max_length=50, default="")
     
     # 联系电话
     phone = StringField(required=True, max_length=20)
@@ -106,6 +110,7 @@ class StuffBorrow(BaseModel):
             'type',  # 添加type字段索引
             'deadline',
             'name',
+            'student_id',  
             'phone',
             'email',
             'supervisor_name',  # 添加指导老师姓名索引
@@ -262,8 +267,9 @@ class StuffBorrow(BaseModel):
         """
         result = {
             "borrow_id": self.borrow_id,
-            "task_name": self.task_name,
+            # "task_name": self.task_name,
             "name": self.name,
+            "student_id": self.student_id,
             "phone": self.phone,
             "email": self.email,
             "grade": self.grade,

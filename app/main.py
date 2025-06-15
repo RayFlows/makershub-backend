@@ -27,13 +27,18 @@ from app.core.auth import AuthMiddleware  # 自定义认证中间件
 from app.services.event_service import EventService
 import json
 from app.routes import (
-    user_router, 
-    duty_apply_router, 
-    event_router, 
-    stuff_borrow_router, 
+    arrange_router,
+    clean_router,
+    duty_apply_router,
+    duty_record_router,
+    event_router,
+    publicity_link_router,
+    site_borrow_router,
     site_router,
-    site_borrow_router
-     # 导入各个模块的路由
+    stuff_router, 
+    stuff_borrow_router,
+    task_router,
+    user_router
 )
 import asyncio
 # 初始化FastAPI应用
@@ -229,6 +234,12 @@ app.include_router(
     site_borrow_router.router,
     prefix="/sites-borrow",
     tags=["场地借用申请"]
+)
+
+app.include_router(
+    stuff_router.router,  # 排班相关API路由
+    prefix="/stuff",      # 路由前缀
+    tags=["物资管理"]       # API文档分类标签
 )
 
 # #健康检查端点：用于监控系统确认API是否正常运行

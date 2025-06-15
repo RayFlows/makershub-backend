@@ -10,8 +10,9 @@ from datetime import datetime
 router = APIRouter()
 
 class BorrowApplyRequest(BaseModel):
-    task_name: str = Field(..., description="任务名称", max_length=200)
+    # task_name: str = Field(..., description="任务名称", max_length=200)
     name: str = Field(..., description="申请人姓名", max_length=100)
+    student_id: str = Field(..., description="学号", max_length=20)
     phone: str = Field(..., description="联系电话", max_length=20)
     email: str = Field(..., description="邮箱地址", max_length=100)
     grade: str = Field(..., description="年级", max_length=50)
@@ -28,8 +29,9 @@ class BorrowApplyRequest(BaseModel):
 
 class BorrowApplyUpdate(BaseModel):
     """更新借物申请请求数据模型"""
-    task_name: Optional[str] = Field(None, min_length=1, max_length=200, description="任务名称")
+    # task_name: Optional[str] = Field(None, min_length=1, max_length=200, description="任务名称")
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="申请人姓名")
+    student_id: Optional[str] = Field(None, min_length=1, max_length=20, description="学号")
     phone: Optional[str] = Field(None, min_length=1, max_length=20, description="联系电话")
     email: Optional[str] = Field(None, description="邮箱地址")
     grade: Optional[str] = Field(None, min_length=1, max_length=50, description="年级")
@@ -108,8 +110,9 @@ async def create_borrow_apply(
         # 创建借物申请记录 - 确保包含所有字段
         borrow_apply = StuffBorrow(
             borrow_id=borrow_id,
-            task_name=borrow_data.task_name,
+            # task_name=borrow_data.task_name,
             name=borrow_data.name,
+            student_id=borrow_data.student_id,
             phone=borrow_data.phone,
             email=borrow_data.email,
             grade=borrow_data.grade,
@@ -243,14 +246,18 @@ async def update_borrow_apply(
         # 更新字段
         update_fields = []
         
-        # 基本字段更新逻辑...
-        if borrow_data.task_name is not None:
-            borrow_apply.task_name = borrow_data.task_name
-            update_fields.append("task_name")
+        # # 基本字段更新逻辑...
+        # if borrow_data.task_name is not None:
+        #     borrow_apply.task_name = borrow_data.task_name
+        #     update_fields.append("task_name")
         
         if borrow_data.name is not None:
             borrow_apply.name = borrow_data.name
             update_fields.append("name")
+
+        if borrow_data.student_id is not None:
+            borrow_apply.student_id = borrow_data.student_id
+            update_fields.append("student_id")    
         
         if borrow_data.phone is not None:
             borrow_apply.phone = borrow_data.phone
@@ -454,8 +461,9 @@ async def get_borrow_apply_simple(
         # 返回简化信息
         simple_data = {
             "borrow_id": borrow_apply.borrow_id,
-            "task_name": borrow_apply.task_name,
+            # "task_name": borrow_apply.task_name,
             "name": borrow_apply.name,
+            "student_id": borrow_apply.student_id,
             "status": borrow_apply.status,
             "status_desc": borrow_apply.get_status_desc(borrow_apply.status),
             "materials_count": borrow_apply.get_materials_count(),
@@ -608,7 +616,7 @@ async def get_all_borrow_ids(
         
         # 查询借物申请，只获取必要字段
         applies_query = StuffBorrow.objects(**query_filter).only(
-            'borrow_id', 'task_name', 'status', 'created_at', 'deadline'
+            'borrow_id', 'status', 'created_at', 'deadline'
         ).order_by('-created_at')
         
         total_count = applies_query.count()
@@ -619,7 +627,7 @@ async def get_all_borrow_ids(
         for apply in applies:
             borrow_ids.append({
                 "borrow_id": apply.borrow_id,
-                "task_name": apply.task_name,
+                # "task_name": apply.task_name,
                 "status": apply.status,
                 "status_desc": StuffBorrow.get_status_desc(apply.status),
                 "created_at": apply.created_at.strftime('%Y-%m-%d %H:%M') if apply.created_at else None,
@@ -712,7 +720,7 @@ async def get_all_borrow_ids_admin(
         
         # 查询借物申请
         applies_query = StuffBorrow.objects(**query_filter).only(
-            'borrow_id', 'task_name', 'userid', 'status', 'created_at', 'deadline'
+            'borrow_id', 'userid', 'status', 'created_at', 'deadline'
         ).order_by('-created_at')
         
         total_count = applies_query.count()
@@ -723,7 +731,7 @@ async def get_all_borrow_ids_admin(
         for apply in applies:
             borrow_data.append({
                 "borrow_id": apply.borrow_id,
-                "task_name": apply.task_name,
+                # "task_name": apply.task_name,
                 "userid": apply.userid,
                 "status": apply.status,
                 "status_desc": StuffBorrow.get_status_desc(apply.status),
@@ -770,14 +778,14 @@ async def get_all_borrow_ids_test():
         
         # 查询最近20个申请
         applies = StuffBorrow.objects().only(
-            'borrow_id', 'task_name', 'userid', 'status', 'created_at'
+            'borrow_id', 'userid', 'status', 'created_at'
         ).order_by('-created_at').limit(20)
         
         test_data = []
         for apply in applies:
             test_data.append({
                 "borrow_id": apply.borrow_id,
-                "task_name": apply.task_name,
+                # "task_name": apply.task_name,
                 "userid": apply.userid,
                 "status": apply.status,
                 "status_desc": StuffBorrow.get_status_desc(apply.status),
@@ -828,14 +836,14 @@ async def get_borrow_ids_by_status(
             userid=current_user.userid, 
             status=status
         ).only(
-            'borrow_id', 'task_name', 'created_at', 'deadline'
+            'borrow_id', 'created_at', 'deadline'
         ).order_by('-created_at').limit(limit)
         
         status_data = []
         for apply in applies:
             status_data.append({
                 "borrow_id": apply.borrow_id,
-                "task_name": apply.task_name,
+                # "task_name": apply.task_name,
                 "created_at": apply.created_at.strftime('%Y-%m-%d %H:%M') if apply.created_at else None,
                 "deadline": apply.deadline.strftime('%Y-%m-%d') if apply.deadline else None
             })

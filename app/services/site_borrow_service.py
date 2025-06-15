@@ -380,3 +380,116 @@ class SiteBorrowService:
         except Exception as e:
             logger.error(f"审核场地申请失败: {str(e)}")
             raise HTTPException(status_code=500, detail="review site-application failed")
+
+    async def update_application(self, apply_id: str, userid: str, update_data: dict):
+        """
+        更新场地借用申请
+        
+        Args:
+            apply_id: 申请ID
+            userid: 当前用户ID（用于验证权限）
+            update_data: 包含更新字段的字典
+        
+        Returns:
+            tuple: (apply_id, 实际更新的字段字典)
+        
+        Raises:
+            HTTPException: 各种错误情况
+        """
+        try:
+            logger.info(f"更新场地申请 | 申请ID: {apply_id} | 用户: {userid}")
+            
+            # 查询申请记录
+            application = SiteBorrow.objects(apply_id=apply_id).first()
+            if not application:
+                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such application",
+                    headers={"X-Error": "Application not found"}
+                )
+            
+            # 检查当前用户是否是申请人
+            if application.userid != userid:
+                logger.warning(f"用户无权限更新该申请 | 当前用户: {userid} | 申请人: {application.userid}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="forbidden to update others' application"
+                )
+            
+            # 检查申请状态是否为0（未审核）或1（打回）
+            if application.state not in [0, 1]:
+                logger.warning(f"申请状态不允许更新 | 当前状态: {application.state}")
+                # 按照接口要求返回400，并附带目标状态和实际状态
+                raise HTTPException(
+                    status_code=400,
+                    detail="forbiddened application state",
+                    data={
+                        "target": "0 or 1",
+                        "actual": application.state
+                    }
+                )
+            
+            # 定义允许更新的字段列表
+            allowed_fields = [
+                "email", "end_time", "mentor_name", "mentor_phone_num", "name",
+                "number", "phone_num", "project_id", "purpose", "site",
+                "start_time", "student_id"
+            ]
+            
+            # 记录实际更新的字段
+            changed_fields = {}
+            
+            # 遍历更新数据，只更新允许的字段
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    # 检查时间字段格式
+                    if field in ["start_time", "end_time"]:
+                        if not parse_datetime(value):
+                            detail_msg = f"时间格式错误: {field} - 应为ISO 8601兼容格式 (如: 2024-02-13)"
+                            logger.error(f"时间格式验证失败 | 字段: {field} | 值: {value}")
+                            raise HTTPException(status_code=400, detail=detail_msg)
+                    
+                    # 记录更改
+                    changed_fields[field] = {
+                        "old": getattr(application, field),
+                        "new": value
+                    }
+                    
+                    # 更新字段值
+                    setattr(application, field, value)
+            
+            # 如果有更新字段，保存申请并更新场地占用状态
+            if changed_fields:
+                # 重置审核状态为未审核（如果之前是打回状态）
+                if application.state == 1:
+                    application.state = 0
+                    application.review = ""  # 清空之前的审核反馈
+                
+                application.save()
+                logger.info(f"申请已更新 | 申请ID: {apply_id} | 更新字段数: {len(changed_fields)}")
+                
+                # 如果场地编号有变更，需要更新场地占用状态
+                if "number" in changed_fields or "site_id" in changed_fields:
+                    # 释放原场地
+                    old_site = Site.objects(site_id=application.site_id, number=changed_fields.get("number", {}).get("old", application.number)).first()
+                    if old_site:
+                        old_site.is_occupied = False
+                        old_site.save()
+                        logger.info(f"原场地已释放 | 场地ID: {application.site_id} | 工位号: {changed_fields.get('number', {}).get('old', application.number)}")
+                    
+                    # 占用新场地
+                    new_site = Site.objects(site_id=application.site_id, number=application.number).first()
+                    if new_site:
+                        new_site.is_occupied = True
+                        new_site.save()
+                        logger.info(f"新场地已占用 | 场地ID: {application.site_id} | 工位号: {application.number}")
+                    else:
+                        logger.error(f"新场地不存在 | 场地ID: {application.site_id} | 工位号: {application.number}")
+            
+            return (apply_id, changed_fields)
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"更新场地申请失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="update site-application failed")
