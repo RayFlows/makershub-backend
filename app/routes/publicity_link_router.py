@@ -6,9 +6,11 @@ from app.models.user import User
 from app.models.publicity_link import PublicityLink
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
 
 router = APIRouter()
 service = PublicityLinkService()
+
 
 
 # 请求模型：提交秀米链接
@@ -22,7 +24,7 @@ class AuditRequest(BaseModel):
     comment: Optional[str] = ""  # 审核意见
 
 
-@router.post("/submit")
+@router.post("/post")
 async def submit_publicity_link(
         request: SubmitLinkRequest,
         current_user: User = Depends(AuthMiddleware.get_current_user)
@@ -42,28 +44,28 @@ async def submit_publicity_link(
     }
 
 
-@router.get("/all", response_model=List[PublicityLink])
-async def get_all_links(
-        current_user: User = Depends(AuthMiddleware.get_current_user)
-):
-    """获取所有秀米链接（权限 = 2 可访问）"""
-    if current_user.role != 2:
-        raise HTTPException(status_code=403, detail="权限不足（需 = 2）")
+# @router.get("/view-all", response_model=List[PublicityLink])
+# async def get_all_links(
+#         current_user: User = Depends(AuthMiddleware.get_current_user)
+# ):
+#     """获取所有秀米链接（权限 = 2 可访问）"""
+#     if current_user.role != 2:
+#         raise HTTPException(status_code=403, detail="权限不足（需 = 2）")
 
-    links = await service.get_all_links()
-    return [link.to_dict() for link in links]
-
-
-@router.get("/user", response_model=List[PublicityLink])
-async def get_user_links(
-        current_user: User = Depends(AuthMiddleware.get_current_user)
-):
-    """获取当前用户提交的秀米链接（所有角色可访问自己的）"""
-    links = await service.get_user_links(current_user.userid)
-    return [link.to_dict() for link in links]
+#     links = await service.get_all_links()
+#     return [link.to_dict() for link in links]
 
 
-@router.delete("/{link_id}")
+# @router.get("/view-my", response_model=List[PublicityLink])
+# async def get_user_links(
+#         current_user: User = Depends(AuthMiddleware.get_current_user)
+# ):
+#     """获取当前用户提交的秀米链接（所有角色可访问自己的）"""
+#     links = await service.get_user_links(current_user.userid)
+#     return [link.to_dict() for link in links]
+
+
+@router.delete("/delete/{link_id}")
 async def delete_link(
         link_id: str,
         current_user: User = Depends(AuthMiddleware.get_current_user)
@@ -87,7 +89,7 @@ async def delete_link(
     }
 
 
-@router.patch("/{link_id}/audit")
+@router.patch("/review/{link_id}")
 async def audit_link(
         link_id: str,
         request: AuditRequest,
@@ -114,7 +116,7 @@ async def audit_link(
     }
 
 
-@router.patch("/{link_id}")
+@router.patch("/update/{link_id}")
 async def update_link(
         link_id: str,
         request: AuditRequest,  # 若需更灵活更新，可自定义 UpdateRequest

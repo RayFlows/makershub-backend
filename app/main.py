@@ -32,7 +32,7 @@ from app.routes import (
     duty_apply_router,
     duty_record_router,
     event_router,
-    # publicity_link_router,
+    publicity_link_router,
     site_borrow_router,
     site_router,
     stuff_router, 
@@ -235,6 +235,30 @@ app.include_router(
     prefix="/sites-borrow",
     tags=["场地借用申请"]
 )
+
+# 注册任务相关路由
+app.include_router(
+    task_router.router,  # 任务相关API路由
+    prefix="/tasks",     # 路由前缀
+    tags=["任务管理"]    # API文档分类标签
+)
+
+
+# app.include_router(
+#     publicity_link_router.router,  
+#     prefix="/publicity-link",  
+#     tags=["Publicity Link"]  
+# )
+# 临时创建一个简单的路由进行测试
+from fastapi import APIRouter
+
+test_router = APIRouter()
+
+@test_router.get("/test")
+def test_route():
+    return {"message": "测试路由成功"}
+
+app.include_router(test_router, prefix="/test")
 
 app.include_router(
     stuff_router.router,  # 排班相关API路由

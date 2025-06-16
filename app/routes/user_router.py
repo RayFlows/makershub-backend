@@ -349,13 +349,14 @@ async def get_all_makers(
         makers = User.objects(
             state=1,  # 状态正常
             role__in=[1, 2]  # 干事或部长及以上
-        ).only('real_name', 'maker_id')  # 只查询需要的字段
+        ).only('real_name', 'maker_id', 'department')  # 只查询需要的字段
         
         # 构建响应数据
         makers_list = [
             {
                 "name": maker.real_name,
-                "maker_id": maker.maker_id
+                "maker_id": maker.maker_id,
+                "department": maker.department
             }
             for maker in makers
         ]

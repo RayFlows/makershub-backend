@@ -101,3 +101,88 @@ def view_all_stuff_borrow(user = Depends(require_permission_level(1))):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class ReviewRequest(BaseModel):
+    borrow_id: str
+    action: str  # "approve" 或 "reject"
+    reason: Optional[str] = ""
+
+@router.post("/review")
+def review_stuff_borrow_application(
+    review_data: ReviewRequest,
+    user = Depends(require_permission_level(1))  # 需要管理员权限
+):
+    """审核借物申请"""
+    print("=== 开始审核借物申请 ===")
+    try:
+        print(f"审核数据: {review_data.dict()}")
+        print(f"审核员: {user}")
+        
+        # 获取审核员ID
+        reviewer_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
+        if not reviewer_id:
+            raise HTTPException(status_code=400, detail="无法获取审核员ID")
+        
+        # 验证操作类型
+        if review_data.action not in ["approve", "reject"]:
+            raise HTTPException(status_code=400, detail="无效的操作类型")
+        
+        # 如果是打回操作，检查是否有理由
+        if review_data.action == "reject" and not review_data.reason.strip():
+            raise HTTPException(status_code=400, detail="打回申请必须提供理由")
+        
+        # 准备审核数据
+        review_dict = {
+            "borrow_id": review_data.borrow_id,
+            "action": review_data.action,
+            "reason": review_data.reason,
+            "reviewer_id": str(reviewer_id)
+        }
+        
+        print(f"调用服务层进行审核: {review_dict}")
+        
+        # 调用服务层进行审核
+        result = StuffBorrowService.review_stuff_borrow_application(review_dict)
+        print(f"审核结果: {result}")
+        
+        return result
+        
+    except HTTPException as he:
+        print(f"HTTP异常: {he.detail}")
+        raise he
+    except Exception as e:
+        print(f"审核失败: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"审核失败: {str(e)}")
+
+class UpdateStuffQuantityRequest(BaseModel):
+    borrow_id: str
+    stuff_updates: List[dict]  # [{"stuff_id": "xxx", "quantity": 2}, ...]
+@router.post("/auto-update-quantity/{sb_id}")
+def auto_update_stuff_quantity(
+    sb_id: str = Path(..., description="借物申请ID"),
+    user = Depends(require_permission_level(1))  # 需要管理员权限
+):
+    """根据借物申请自动更新物资余量"""
+    print("=== 开始自动更新物资余量 ===")
+    try:
+        print(f"申请ID: {sb_id}")
+        
+        # 获取操作员ID
+        operator_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
+        if not operator_id:
+            raise HTTPException(status_code=400, detail="无法获取操作员ID")
+        
+        # 调用服务层自动更新
+        result = StuffBorrowService.auto_update_stuff_quantity_from_application(sb_id, str(operator_id))
+        print(f"自动更新结果: {result}")
+        
+        return result
+        
+    except HTTPException as he:
+        print(f"HTTP异常: {he.detail}")
+        raise he
+    except Exception as e:
+        print(f"自动更新物资余量失败: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"自动更新物资余量失败: {str(e)}")
