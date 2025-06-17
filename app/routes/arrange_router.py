@@ -12,6 +12,7 @@ class ArrangePerson(BaseModel):
     name: str
     order: int
     current: bool
+    maker_id: str  
 
 # 获取排班安排
 @router.get("/get-arrangement")
@@ -61,14 +62,15 @@ async def batch_create_arrangements(
             for person in person_list:
                 try:
                     # 确保包含必要字段
-                    if "name" not in person or "order" not in person or "current" not in person:
-                        logger.warning(f"人员数据缺少必要字段: {person}")
-                        continue
+                    if not all(key in person for key in ["name", "order", "current", "maker_id"]):
+                                logger.warning(f"人员数据缺少必要字段: {person}")
+                                continue
                     
                     validated_list.append({
                         "name": person["name"],
                         "order": person["order"],
-                        "current": person["current"]
+                        "current": person["current"],
+                        "maker_id": person["maker_id"]
                     })
                 except Exception as e:
                     logger.warning(f"解析人员数据失败: {str(e)} | 数据: {person}")

@@ -11,6 +11,7 @@ class Arrange(BaseModel):
     """
     arrange_id = StringField(required=True, unique=True)  # 排班编号
     name = StringField(required=True)  # 排班人员姓名
+    maker_id = StringField(required=True)  # 新增: 负责人协会ID
     task_type = IntField(required=True)  # 任务类型 (1:活动文案, 2:推文, 3:新闻稿)
     order = IntField(required=True)  # 排班顺序
     current = BooleanField(default=False)  # 当前是否值班
@@ -21,7 +22,8 @@ class Arrange(BaseModel):
         'indexes': [
             'task_type',
             'order',
-            'current'
+            'current',
+            'maker_id'  # 新增索引
         ]
     }
     
@@ -38,6 +40,7 @@ class Arrange(BaseModel):
         return {
             "arrange_id": self.arrange_id,
             "name": self.name,
+            "maker_id": self.maker_id,  # 新增字段
             "task_type": self.task_type,
             "order": self.order,
             "current": self.current,

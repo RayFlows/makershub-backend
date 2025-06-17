@@ -1,7 +1,3 @@
-"""
-任务模型模块 (Task Model Module)
-"""
-
 from mongoengine import StringField, IntField, DateTimeField
 from .base_model import BaseModel
 from datetime import datetime
@@ -14,8 +10,7 @@ class Task(BaseModel):
     Attributes:
         task_id: 任务唯一标识符
         department: 负责部门
-        task_name: 任务名称
-        userid: 负责人userid
+        task_type: 任务类型 (0:其他, 1:活动文案, 2:推文, 3:新闻稿)
         maker_id: 负责人协会ID
         name: 负责人姓名
         content: 任务内容
@@ -25,8 +20,7 @@ class Task(BaseModel):
     
     task_id = StringField(required=True, unique=True)
     department = StringField(required=True)
-    task_name = StringField(required=True)
-    userid = StringField(required=True)
+    task_type = IntField(required=True)
     maker_id = StringField(required=True)
     name = StringField(required=True)
     content = StringField(required=True)
@@ -39,7 +33,7 @@ class Task(BaseModel):
         'indexes': [
             'task_id',
             'department',
-            'userid',
+            'task_type',
             'maker_id',
             'state',
             'deadline'
@@ -53,15 +47,14 @@ class Task(BaseModel):
         return {
             "task_id": self.task_id,
             "department": self.department,
-            "task_name": self.task_name,
-            "userid": self.userid,
+            "task_type": self.task_type,
             "maker_id": self.maker_id,
             "name": self.name,
             "content": self.content,
             "state": self.state,
-            "deadline": self.deadline.isoformat() if self.deadline else None,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at
+            "deadline": self.deadline.isoformat() + "Z",
+            "created_at": self.created_at.isoformat() + "Z",
+            "updated_at": self.updated_at.isoformat() + "Z"
         }
     
     @classmethod
@@ -69,4 +62,4 @@ class Task(BaseModel):
         """生成唯一任务ID"""
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # 精确到毫秒
         random_suffix = str(random.randint(100, 999))  # 3位随机数
-        return f"TK{timestamp}_{random_suffix}"
+        return f"TS{timestamp}_{random_suffix}"
