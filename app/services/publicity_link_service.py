@@ -1,100 +1,236 @@
-from typing import List, Optional
 from app.models.publicity_link import PublicityLink
-from app.models.user import User
 from loguru import logger
-from datetime import datetime
+from fastapi import HTTPException
+from app.core.utils import parse_datetime
 
 class PublicityLinkService:
-    """
-    秀米链接业务逻辑层
-    - 负责增删改查、审核流程等操作
-    """
-
-    async def create_link(self, submitter_id: str, link_url: str) -> Optional[PublicityLink]:
-        """提交秀米链接"""
+    """秀米链接服务类：处理秀米链接相关的业务逻辑"""
+    
+    async def create_link(self, userid: str, name: str, title: str, link_url: str):
+        """
+        创建秀米链接
+        
+        Args:
+            userid: 用户ID
+            name: 发布人姓名
+            title: 推文标题
+            link_url: 链接地址
+            
+        Returns:
+            str: 创建的链接ID
+        """
         try:
-            submitter = User.objects(userid=submitter_id).first()
-            if not submitter:
-                logger.error(f"提交人不存在: {submitter_id}")
-                return None
-
-            # 检查权限（权限 ≥1 可提交）
-            if submitter.role < 1:
-                logger.error(f"用户 {submitter_id} 权限不足（需 ≥1）")
-                return None
-
+            # 验证URL格式
+            if not link_url.startswith(("http://", "https://")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="无效的URL格式，必须以http://或https://开头"
+                )
+            
+            # 创建新链接
             link = PublicityLink(
-                submitter=submitter,
-                link_url=link_url,
-                audit_status=0  # 初始待审核
+                link_id=PublicityLink.generate_link_id(),
+                userid=userid,
+                name=name,
+                title=title,
+                link=link_url,
+                state=0  # 初始状态为待审核
             )
             link.save()
-            return link
+            
+            logger.info(f"秀米链接创建成功 | 链接ID: {link.link_id} | 用户: {userid}")
+            return link.link_id
+        except HTTPException as he:
+            raise he
         except Exception as e:
-            logger.error(f"创建秀米链接失败: {e}")
-            return None
-
-    async def get_all_links(self) -> List[PublicityLink]:
-        """获取所有秀米链接（权限校验在路由层做）"""
+            logger.error(f"创建秀米链接失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="创建秀米链接失败")
+    
+    async def get_all_links(self):
+        """
+        获取所有秀米链接
+        
+        Returns:
+            list: 包含所有链接的字典列表
+        """
         try:
-            return PublicityLink.objects().order_by("-submit_time")
+            links = PublicityLink.objects().order_by("-create_time")
+            return [{
+                "link_id": link.link_id,
+                "title": link.title,
+                "create_time": link.create_time.isoformat() + "Z",
+                "name": link.name,
+                "link": link.link,
+                "state": link.state,
+                "review": link.review
+            } for link in links]
         except Exception as e:
-            logger.error(f"查询所有秀米链接失败: {e}")
-            return []
-
-    async def get_user_links(self, user_id: str) -> List[PublicityLink]:
-        """获取某用户提交的秀米链接"""
+            logger.error(f"获取所有秀米链接失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="获取所有秀米链接失败")
+    
+    async def get_user_links(self, userid: str):
+        """
+        获取用户的所有秀米链接
+        
+        Args:
+            userid: 用户ID
+            
+        Returns:
+            list: 包含用户链接的字典列表
+        """
         try:
-            return PublicityLink.objects(submitter__userid=user_id).order_by("-submit_time")
+            links = PublicityLink.objects(userid=userid).order_by("-create_time")
+            return [{
+                "link_id": link.link_id,
+                "title": link.title,
+                "create_time": link.create_time.isoformat() + "Z",
+                "name": link.name,
+                "link": link.link,
+                "state": link.state,
+                "review": link.review
+            } for link in links]
         except Exception as e:
-            logger.error(f"查询用户 {user_id} 的秀米链接失败: {e}")
-            return []
-
-    async def delete_link(self, link_id: str) -> bool:
-        """删除秀米链接（需校验权限，建议路由层处理）"""
+            logger.error(f"获取用户秀米链接失败: {str(e)} | 用户ID: {userid}")
+            raise HTTPException(status_code=500, detail="获取用户秀米链接失败")
+    
+    async def update_link(self, link_id: str, userid: str, update_data: dict):
+        """
+        更新秀米链接
+        
+        Args:
+            link_id: 链接ID
+            userid: 用户ID（用于验证权限）
+            update_data: 更新数据
+            
+        Returns:
+            tuple: (link_id, 实际更新的字段字典)
+        """
         try:
-            link = PublicityLink.objects(id=link_id).first()
-            if link:
-                link.delete()
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"删除秀米链接 {link_id} 失败: {e}")
-            return False
-
-    async def update_link(self, link_id: str, **kwargs) -> Optional[PublicityLink]:
-        """更新秀米链接（一般用于补充审核信息）"""
-        try:
-            link = PublicityLink.objects(id=link_id).first()
+            # 查询链接记录
+            link = PublicityLink.objects(link_id=link_id).first()
             if not link:
-                return None
-
-            # 仅允许更新审核相关字段（可根据需求扩展）
-            allowed_fields = ["audit_status", "audit_comment", "auditor", "audit_time"]
-            for field, value in kwargs.items():
-                if field in allowed_fields and hasattr(link, field):
+                logger.warning(f"链接不存在 | 链接ID: {link_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such link",
+                    headers={"X-Error": "Link not found"}
+                )
+            
+            # 检查当前用户是否是提交人
+            if link.userid != userid:
+                logger.warning(f"用户无权限更新该链接 | 当前用户: {userid} | 提交人: {link.userid}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="forbidden to update others' link"
+                )
+            
+            # 检查链接状态是否为0（待审核）或2（已打回）
+            if link.state not in [0, 2]:
+                logger.warning(f"链接状态不允许更新 | 当前状态: {link.state}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="forbiddened link state",
+                    data={
+                        "target": "0 or 2",
+                        "actual": link.state
+                    }
+                )
+            
+            # 定义允许更新的字段
+            allowed_fields = ["title", "name", "link"]
+            
+            # 记录实际更新的字段
+            changed_fields = {}
+            
+            # 遍历更新数据，只更新允许的字段
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    # 特殊处理链接字段
+                    if field == "link" and not value.startswith(("http://", "https://")):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="无效的URL格式，必须以http://或https://开头"
+                        )
+                    
+                    # 记录更改
+                    changed_fields[field] = {
+                        "old": getattr(link, field),
+                        "new": value
+                    }
+                    
+                    # 更新字段值
                     setattr(link, field, value)
-
-            link.audit_time = datetime.now()  # 自动更新审核时间
-            link.save()
-            return link
+            
+            # 如果有更新字段，保存并重置状态为待审核
+            if changed_fields:
+                link.state = 0  # 重置为待审核状态
+                link.review = ""  # 清空审核反馈
+                link.save()
+                logger.info(f"链接已更新 | 链接ID: {link_id} | 更新字段数: {len(changed_fields)}")
+            
+            return (link_id, {k: v["new"] for k, v in changed_fields.items()})
+        except HTTPException as he:
+            raise he
         except Exception as e:
-            logger.error(f"更新秀米链接 {link_id} 失败: {e}")
-            return None
-
-    async def audit_link(
-        self,
-        link_id: str,
-        auditor: User,
-        pass_status: bool,
-        comment: str = ""
-    ) -> Optional[PublicityLink]:
-        """执行审核操作（封装更新逻辑）"""
-        status = 1 if pass_status else 2
-        return await self.update_link(
-            link_id,
-            audit_status=status,
-            audit_comment=comment,
-            auditor=auditor,
-            audit_time=datetime.now()
-        )
+            logger.error(f"更新秀米链接失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="update link failed")
+    
+    async def review_link(self, link_id: str, state: int, review: str = ""):
+        """
+        审核秀米链接
+        
+        Args:
+            link_id: 链接ID
+            state: 新状态 (1:通过, 2:打回)
+            review: 审核反馈
+            
+        Returns:
+            tuple: (link_id, state, review)
+        """
+        try:
+            # 查询链接记录
+            link = PublicityLink.objects(link_id=link_id).first()
+            if not link:
+                logger.warning(f"链接不存在 | 链接ID: {link_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such link",
+                    headers={"X-Error": "Link not found"}
+                )
+            
+            # 验证新状态值
+            if state not in [1, 2]:
+                logger.warning(f"无效的新状态值: {state}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="invalid state value",
+                    data={
+                        "allowed": [1, 2],
+                        "actual": state
+                    }
+                )
+            
+            # 检查当前状态是否为0（待审核）
+            if link.state != 0:
+                logger.warning(f"链接状态不允许审核 | 当前状态: {link.state}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="link not in pending state",
+                    data={
+                        "required": 0,
+                        "actual": link.state
+                    }
+                )
+            
+            # 更新链接状态
+            link.state = state
+            link.review = review
+            link.save()
+            
+            logger.info(f"链接已审核 | 链接ID: {link_id} | 新状态: {state}")
+            return (link_id, state, review)
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"审核秀米链接失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="review link failed")

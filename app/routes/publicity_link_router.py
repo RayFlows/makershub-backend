@@ -1,144 +1,198 @@
 from fastapi import APIRouter, HTTPException, Depends
-from loguru import logger
 from app.services.publicity_link_service import PublicityLinkService
-from app.core.auth import AuthMiddleware
-from app.models.user import User
-from app.models.publicity_link import PublicityLink
+from app.core.auth import require_permission_level
+from loguru import logger
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+from typing import Optional, List
 
 router = APIRouter()
-service = PublicityLinkService()
-
-
 
 # 请求模型：提交秀米链接
 class SubmitLinkRequest(BaseModel):
-    link_url: str  # 需包含 https://
+    title: str
+    name: str
+    link: str
 
+# 请求模型：更新秀米链接
+class UpdateLinkRequest(BaseModel):
+    title: Optional[str] = None
+    name: Optional[str] = None
+    link: Optional[str] = None
 
-# 请求模型：审核操作
-class AuditRequest(BaseModel):
-    pass_audit: bool  # 是否通过
-    comment: Optional[str] = ""  # 审核意见
+# 请求模型：审核秀米链接
+class ReviewRequest(BaseModel):
+    state: int
+    review: str = ""
 
-
+# 提交秀米链接
 @router.post("/post")
 async def submit_publicity_link(
-        request: SubmitLinkRequest,
-        current_user: User = Depends(AuthMiddleware.get_current_user)
+    request: SubmitLinkRequest,
+    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
+    service: PublicityLinkService = Depends(PublicityLinkService)
 ):
-    """提交秀米链接（权限 ≥1 可访问）"""
-    if current_user.role < 1:
-        raise HTTPException(status_code=403, detail="权限不足（需 ≥1）")
+    """提交秀米链接"""
+    try:
+        logger.info(f"提交秀米链接 | 用户: {user.userid}")
+        
+        # 调用服务层创建链接
+        link_id = await service.create_link(
+            userid=user.userid,
+            name=request.name,
+            title=request.title,
+            link_url=request.link
+        )
+        
+        return {
+            "code": 200,
+            "message": "successfully post xiumi link",
+            "data": {
+                "link_id": link_id
+            }
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"提交秀米链接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="提交秀米链接失败")
 
-    link = await service.create_link(current_user.userid, request.link_url)
-    if not link:
-        raise HTTPException(status_code=500, detail="提交失败，请检查链接格式或重试")
-
-    return {
-        "code": 200,
-        "message": "提交成功，等待审核",
-        "data": link.to_dict()
-    }
-
-
-# @router.get("/view-all", response_model=List[PublicityLink])
-# async def get_all_links(
-#         current_user: User = Depends(AuthMiddleware.get_current_user)
-# ):
-#     """获取所有秀米链接（权限 = 2 可访问）"""
-#     if current_user.role != 2:
-#         raise HTTPException(status_code=403, detail="权限不足（需 = 2）")
-
-#     links = await service.get_all_links()
-#     return [link.to_dict() for link in links]
-
-
-# @router.get("/view-my", response_model=List[PublicityLink])
-# async def get_user_links(
-#         current_user: User = Depends(AuthMiddleware.get_current_user)
-# ):
-#     """获取当前用户提交的秀米链接（所有角色可访问自己的）"""
-#     links = await service.get_user_links(current_user.userid)
-#     return [link.to_dict() for link in links]
-
-
-@router.delete("/delete/{link_id}")
-async def delete_link(
-        link_id: str,
-        current_user: User = Depends(AuthMiddleware.get_current_user)
+# 获取所有秀米链接
+@router.get("/view-all")
+async def get_all_links(
+    user: dict = Depends(require_permission_level(2)),  # 需要权限2
+    service: PublicityLinkService = Depends(PublicityLinkService)
 ):
-    """删除秀米链接（需是提交人或权限 ≥2）"""
-    link = PublicityLink.objects(id=link_id).first()
-    if not link:
-        raise HTTPException(status_code=404, detail="链接不存在")
+    """获取所有秀米链接（审核页面使用）"""
+    try:
+        logger.info(f"获取所有秀米链接 | 请求用户: {user.userid}")
+        
+        # 调用服务层获取所有链接
+        links = await service.get_all_links()
+        
+        return {
+            "code": 200,
+            "message": "successfully get all xiumi link",
+            "data": {
+                "total": len(links),
+                "list": links
+            }
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"获取所有秀米链接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取所有秀米链接失败")
 
-    # 校验权限：提交人或权限 ≥2
-    if link.submitter.userid != current_user.userid and current_user.role < 2:
-        raise HTTPException(status_code=403, detail="权限不足（仅提交人或权限 ≥2 可删除）")
-
-    success = await service.delete_link(link_id)
-    if not success:
-        raise HTTPException(status_code=500, detail="删除失败")
-
-    return {
-        "code": 200,
-        "message": "删除成功"
-    }
-
-
-@router.patch("/review/{link_id}")
-async def audit_link(
-        link_id: str,
-        request: AuditRequest,
-        current_user: User = Depends(AuthMiddleware.get_current_user)
+# 获取用户秀米链接
+@router.get("/view-my")
+async def get_user_links(
+    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
+    service: PublicityLinkService = Depends(PublicityLinkService)
 ):
-    """审核秀米链接（权限 ≥2 可访问）"""
-    if current_user.role < 2:
-        raise HTTPException(status_code=403, detail="权限不足（需 ≥2）")
+    """获取当前用户的秀米链接"""
+    try:
+        logger.info(f"获取用户秀米链接 | 用户: {user.userid}")
+        
+        # 调用服务层获取用户链接
+        links = await service.get_user_links(user.userid)
+        
+        return {
+            "code": 200,
+            "message": "successfully get my xiumi link",
+            "data": {
+                "total": len(links),
+                "list": links
+            }
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"获取用户秀米链接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取用户秀米链接失败")
 
-    link = await service.audit_link(
-        link_id,
-        current_user,
-        request.pass_audit,
-        request.comment
-    )
-    if not link:
-        raise HTTPException(status_code=500, detail="审核失败")
-
-    # TODO: 这里可扩展「通知提交人」逻辑（调用微信服务等）
-    return {
-        "code": 200,
-        "message": "审核完成",
-        "data": link.to_dict()
-    }
-
-
+# 更新秀米链接
 @router.patch("/update/{link_id}")
 async def update_link(
-        link_id: str,
-        request: AuditRequest,  # 若需更灵活更新，可自定义 UpdateRequest
-        current_user: User = Depends(AuthMiddleware.get_current_user)
+    link_id: str,
+    request: UpdateLinkRequest,
+    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
+    service: PublicityLinkService = Depends(PublicityLinkService)
 ):
-    """更新秀米链接（一般用于审核补充，实际可根据需求扩展字段）"""
-    # 简单示例：仅允许审核人员更新（可扩展更细权限）
-    if current_user.role < 2:
-        raise HTTPException(status_code=403, detail="权限不足（需 ≥2）")
+    """更新秀米链接"""
+    try:
+        logger.info(f"更新秀米链接 | 链接ID: {link_id} | 用户: {user.userid}")
+        
+        # 转换为字典并移除空值
+        update_data = {k: v for k, v in request.dict().items() if v is not None}
+        
+        if not update_data:
+            logger.warning("没有提供更新字段")
+            raise HTTPException(
+                status_code=400,
+                detail="no fields provided for update"
+            )
+        
+        # 调用服务层更新链接
+        result = await service.update_link(link_id, user.userid, update_data)
+        
+        return {
+            "code": 200,
+            "message": "successfully update xiumi-link",
+            "data": {
+                "link_id": result[0],
+                "changed": result[1]
+            }
+        }
+    except HTTPException as he:
+        if he.status_code == 400 and hasattr(he, 'data'):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "code": 400,
+                    "message": he.detail,
+                    "data": he.data
+                }
+            )
+        raise he
+    except Exception as e:
+        logger.error(f"更新秀米链接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="update link failed")
 
-    link = await service.update_link(
-        link_id,
-        audit_status=1 if request.pass_audit else 2,
-        audit_comment=request.comment,
-        auditor=current_user,
-        audit_time=datetime.now()
-    )
-    if not link:
-        raise HTTPException(status_code=500, detail="更新失败")
-
-    return {
-        "code": 200,
-        "message": "更新成功",
-        "data": link.to_dict()
-    }
+# 审核秀米链接
+@router.patch("/review/{link_id}")
+async def review_link(
+    link_id: str,
+    request: ReviewRequest,
+    user: dict = Depends(require_permission_level(2)),  # 需要权限2
+    service: PublicityLinkService = Depends(PublicityLinkService)
+):
+    """审核秀米链接"""
+    try:
+        logger.info(f"审核秀米链接 | 链接ID: {link_id} | 审核员: {user.userid}")
+        
+        # 调用服务层审核链接
+        result = await service.review_link(link_id, request.state, request.review)
+        
+        return {
+            "code": 200,
+            "message": "successfully reviewed xiumi-link",
+            "data": {
+                "link_id": result[0],
+                "state": result[1],
+                "review": result[2]
+            }
+        }
+    except HTTPException as he:
+        if he.status_code == 400 and hasattr(he, 'data'):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "code": 400,
+                    "message": he.detail,
+                    "data": he.data
+                }
+            )
+        raise he
+    except Exception as e:
+        logger.error(f"审核秀米链接失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="review link failed")

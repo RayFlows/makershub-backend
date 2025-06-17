@@ -21,9 +21,9 @@ class StuffBorrow(BaseModel):
     stuff_list = ListField(DictField(), required=True)
     
     # 团队借物相关字段（可选）
-    project_num = StringField(max_length=50)
-    mentor_name = StringField(max_length=100)
-    mentor_phone_num = StringField(max_length=20)
+    project_number = StringField(max_length=50)
+    supervisor_name = StringField(max_length=100)
+    supervisor_phone = StringField(max_length=20)
     
     def to_dict(self):
         return {
@@ -41,9 +41,9 @@ class StuffBorrow(BaseModel):
             'reason': self.reason,
             'state': self.state,
             'stuff_list': self.stuff_list,
-            'project_num': self.project_num,
-            'mentor_name': self.mentor_name,
-            'mentor_phone_num': self.mentor_phone_num,
+            'project_number': self.project_number,
+            'supervisor_name': self.supervisor_name,
+            'supervisor_phone': self.supervisor_phone,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

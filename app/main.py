@@ -244,21 +244,12 @@ app.include_router(
 )
 
 
-# app.include_router(
-#     publicity_link_router.router,  
-#     prefix="/publicity-link",  
-#     tags=["Publicity Link"]  
-# )
-# 临时创建一个简单的路由进行测试
-from fastapi import APIRouter
+app.include_router(
+    publicity_link_router.router,  
+    prefix="/publicity-link",  
+    tags=["秀米链接"]  
+)
 
-test_router = APIRouter()
-
-@test_router.get("/test")
-def test_route():
-    return {"message": "测试路由成功"}
-
-app.include_router(test_router, prefix="/test")
 
 app.include_router(
     stuff_router.router,  # 排班相关API路由

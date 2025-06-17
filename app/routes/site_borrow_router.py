@@ -319,3 +319,46 @@ async def update_site_borrow_application(
     except Exception as e:
         logger.error(f"更新场地申请失败: {str(e)}")
         raise HTTPException(status_code=500, detail="update site-application failed")
+
+@router.patch("/return/{apply_id}")
+async def return_borrow_application(
+    apply_id: str,  # 从路径获取申请ID
+    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
+    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
+):
+    """
+    归还已借用的场地
+    
+    用户归还已借用的场地，将状态更新为已归还（3）
+    只有状态为2（通过未归还）的申请才能被归还
+    """
+    try:
+        logger.info(f"归还场地 | 申请ID: {apply_id} | 用户: {user.userid}")
+        
+        # 调用服务层归还场地
+        result = await site_borrow_service.return_borrow_application(apply_id, user.userid)
+        
+        return {
+            "code": 200,
+            "message": "successfully return site",
+            "data": {
+                "apply_id": result[0],
+                "state": result[1]
+            }
+        }
+    except HTTPException as he:
+        # 处理400错误的特殊返回格式
+        if he.status_code == 400 and hasattr(he, 'data'):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "code": 400,
+                    "message": he.detail,
+                    "data": he.data
+                }
+            )
+        # 处理其他HTTP异常
+        raise he
+    except Exception as e:
+        logger.error(f"归还场地失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="return site failed")

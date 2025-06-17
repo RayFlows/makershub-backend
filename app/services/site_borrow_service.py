@@ -493,3 +493,72 @@ class SiteBorrowService:
         except Exception as e:
             logger.error(f"更新场地申请失败: {str(e)}")
             raise HTTPException(status_code=500, detail="update site-application failed")
+
+    async def return_borrow_application(self, apply_id: str, userid: str):
+        """
+        归还已借用的场地
+        
+        Args:
+            apply_id: 申请ID
+            userid: 当前用户ID（用于验证权限）
+        
+        Returns:
+            tuple: (apply_id, new_state)
+        
+        Raises:
+            HTTPException: 各种错误情况
+        """
+        try:
+            logger.info(f"处理场地归还 | 申请ID: {apply_id} | 用户: {userid}")
+            
+            # 查询申请记录
+            application = SiteBorrow.objects(apply_id=apply_id).first()
+            if not application:
+                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail="no such application",
+                    headers={"X-Error": "Application not found"}
+                )
+            
+            # 检查当前用户是否是申请人
+            if application.userid != userid:
+                logger.warning(f"用户无权限归还该场地 | 当前用户: {userid} | 申请人: {application.userid}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="forbidden to return others' application"
+                )
+            
+            # 检查申请状态是否为2（通过未归还）
+            if application.state != 2:
+                logger.warning(f"申请状态不允许归还 | 当前状态: {application.state}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="forbiddened application state",
+                    data={
+                        "target": 2,
+                        "actual": application.state
+                    }
+                )
+            
+            # 更新申请状态为3（已归还）
+            application.state = 3
+            application.save()
+            
+            # 释放场地占用状态
+            site = Site.objects(site_id=application.site_id, number=application.number).first()
+            if site:
+                site.is_occupied = False
+                site.save()
+                logger.info(f"场地已释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
+            else:
+                logger.error(f"场地不存在，无法释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
+            
+            logger.info(f"场地已成功归还 | 申请ID: {apply_id}")
+            return (apply_id, 3)
+            
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            logger.error(f"归还场地失败: {str(e)}")
+            raise HTTPException(status_code=500, detail="return site failed")
