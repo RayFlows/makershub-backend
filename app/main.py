@@ -38,6 +38,7 @@ from app.routes import (
     stuff_router, 
     stuff_borrow_router,
     task_router,
+    arrange_router,
     user_router
 )
 import asyncio
@@ -255,6 +256,12 @@ app.include_router(
     stuff_router.router,  # 排班相关API路由
     prefix="/stuff",      # 路由前缀
     tags=["物资管理"]       # API文档分类标签
+)
+
+app.include_router(
+    arrange_router.router,  # 排班相关API路由
+    prefix="/arrange",  # 路由前缀
+    tags=["学年工作安排"]        # API文档分类标签
 )
 
 # #健康检查端点：用于监控系统确认API是否正常运行

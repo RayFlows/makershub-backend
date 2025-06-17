@@ -76,8 +76,9 @@ class AuthMiddleware:
         "/health",          # 健康检查
         "/favicon.ico",     # 网站图标
         "/",                 # 根路径
-        "/users/test-user", # 测试用户接口（临时）
-        "/site/add",       # 添加场地接口（临时）
+        "/users/test-user", # 测试用户接口（测试用）
+        "/site/add",       # 添加场地接口（测试用）
+        "/arrange/arrangements/batch"  # 批量创建排班安排（测试用）
     }
 
     @classmethod

@@ -124,14 +124,14 @@ class PublicityLinkService:
                     detail="forbidden to update others' link"
                 )
             
-            # 检查链接状态是否为0（待审核）或2（已打回）
-            if link.state not in [0, 2]:
+            # 检查链接状态是否为0（待审核）或1（已打回）
+            if link.state not in [0, 1]:
                 logger.warning(f"链接状态不允许更新 | 当前状态: {link.state}")
                 raise HTTPException(
                     status_code=400,
                     detail="forbiddened link state",
                     data={
-                        "target": "0 or 2",
+                        "target": "0 or 1",
                         "actual": link.state
                     }
                 )
@@ -181,7 +181,7 @@ class PublicityLinkService:
         
         Args:
             link_id: 链接ID
-            state: 新状态 (1:通过, 2:打回)
+            state: 新状态 (1:打回, 2:通过)
             review: 审核反馈
             
         Returns:
