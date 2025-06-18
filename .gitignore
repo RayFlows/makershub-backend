@@ -79,3 +79,6 @@ Thumbs.db
 .env.*.local
 uploads/
 temp/
+
+#数据
+/data/
