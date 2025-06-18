@@ -36,7 +36,7 @@ services:
       - "27017:27017"
     volumes:
       - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
-      - mongo-data:/data/db  # 添加数据持久化卷
+      - ./data/mongo:/data/db  # 添加数据持久化卷
     restart: unless-stopped
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
@@ -66,7 +66,7 @@ services:
       retries: 3
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - minio-data:/data  # 添加数据持久化卷
+      - ./data/minio:/data  # 添加数据持久化卷
     networks:
       - makerhub-network
 
@@ -91,8 +91,3 @@ services:
 networks:
   makerhub-network:
     driver: bridge
-
-# 在文件底部添加卷定义
-volumes:
-  mongo-data:  # MongoDB 数据卷
-  minio-data:  # MinIO 数据卷
