@@ -159,6 +159,7 @@ class StuffBorrowService:
                 "email": borrow_record.email,
                 "grade": borrow_record.grade,
                 "major": borrow_record.major,
+                "review": borrow_record.review,
                 "start_time": borrow_record.start_time.isoformat() + "Z" if borrow_record.start_time else None,
                 "deadline": borrow_record.deadline.isoformat() + "Z" if borrow_record.deadline else None,
                 "reason": borrow_record.reason,
@@ -251,7 +252,7 @@ class StuffBorrowService:
             
             # 可选：保存审核理由
             if reason:
-                existing_application.review_reason = reason  # 确保模型中有该字段
+                existing_application.review = reason  # 确保模型中有该字段
                 existing_application.save()
                 print(f"[DEBUG] 审核理由保存完毕: {reason}")
             

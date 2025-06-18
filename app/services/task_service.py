@@ -245,11 +245,11 @@ class TaskService:
                 }
             
             # 检查任务状态
-            if task.state in [1, 2]:  # 已完成或已取消
-                logger.error(f"不能更新已完成或已取消的任务: {task_id} | 当前状态: {task.state}")
+            if task.state in [0, 1]:  # 已完成或已取消
+                logger.error(f"不能更新未完成或已完成的任务: {task_id} | 当前状态: {task.state}")
                 return {
                     "success": False,
-                    "error": "已完成或已取消的任务不能被更新",
+                    "error": "未完成或已完成的任务不能被更新",
                     "code": 400
                 }   
 
@@ -297,6 +297,10 @@ class TaskService:
             task.state = 0
             
             task.save()
+
+            # 记录状态变更
+            if original_state == 2:  # 原状态是已取消
+                logger.info(f"已取消的任务被重新激活: {task_id}")
             
             logger.info(f"任务已更新: {task_id}")
             return {

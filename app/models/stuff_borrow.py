@@ -19,6 +19,7 @@ class StuffBorrow(BaseModel):
     reason = StringField(max_length=500, required=True)
     state = IntField(required=True, default=0)  # 0-未审核, 1-被打回, 2-通过未归还, 3-已归还
     stuff_list = ListField(DictField(), required=True)
+    review = StringField(max_length=500, default='')  # 审核意见
     
     # 团队借物相关字段（可选）
     project_number = StringField(max_length=50)
@@ -40,6 +41,7 @@ class StuffBorrow(BaseModel):
             'deadline': self.deadline.isoformat() if self.deadline else None,
             'reason': self.reason,
             'state': self.state,
+            'review': self.review,
             'stuff_list': self.stuff_list,
             'project_number': self.project_number,
             'supervisor_name': self.supervisor_name,
