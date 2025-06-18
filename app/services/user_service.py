@@ -59,7 +59,7 @@ class UserService:
                     state=1,       # 1表示正常状态
                     score=0,       # 初始积分为0
                     role=1,        # 初始用户级别为1
-                    department="未分配",  # 初始部门为未分配
+                    department=999,  # 初始部门为999(无部门)
                     profile_photo=default_avatar,  # 初始化头像链接为空
                     phone_num="",  # 初始化手机号为空
                     motto="",       # 初始化个性签名为空

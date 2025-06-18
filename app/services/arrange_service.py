@@ -182,3 +182,44 @@ class ArrangeService:
         except Exception as e:
             logger.error(f"获取当前值班人员失败: {str(e)}")
             return None
+
+    async def get_current_makers(self) -> list:
+        """
+        获取本次宣传部三个任务对应的值班人员
+        
+        Returns:
+            list: 包含三个任务当前值班人员信息的列表
+        """
+        try:
+            result = []
+            # 获取三种任务类型的当前值班人员
+            for task_type in [1, 2, 3]:
+                arrangement = Arrange.objects(
+                    task_type=task_type,
+                    current=True
+                ).first()
+                
+                if arrangement:
+                    result.append({
+                        "task_type": task_type,
+                        "name": arrangement.name,
+                        "maker_id": arrangement.maker_id
+                    })
+                else:
+                    # 如果没有找到当前值班人员，返回空信息
+                    result.append({
+                        "task_type": task_type,
+                        "name": "",
+                        "maker_id": ""
+                    })
+                    logger.warning(f"未找到任务类型 {task_type} 的当前值班人员")
+            
+            return result
+        except Exception as e:
+            logger.error(f"获取当前值班人员失败: {str(e)}")
+            # 返回默认结构
+            return [
+                {"task_type": 1, "name": "", "maker_id": ""},
+                {"task_type": 2, "name": "", "maker_id": ""},
+                {"task_type": 3, "name": "", "maker_id": ""}
+            ]

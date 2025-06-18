@@ -339,32 +339,50 @@ async def get_all_makers(
     获取全部协会成员及编号
     
     返回所有状态正常且角色为干事(1)或部长及以上(2)的协会成员列表
-    每个成员包含真实姓名和协会ID(maker_id)
+    按部门分组返回，每个部门包含真实姓名和协会ID(maker_id)
     
     Returns:
-        dict: 包含成员列表的响应
+        dict: 包含分组成员列表的响应
     """
     try:
         # 查询所有状态正常(1)且角色为干事(1)或部长及以上(2)的用户
         makers = User.objects(
-            state=1,  # 状态正常
-            role__in=[1, 2]  # 干事或部长及以上
-        ).only('real_name', 'maker_id', 'department')  # 只查询需要的字段
+            state=1,
+            role__in=[1, 2]
+        ).only('real_name', 'maker_id', 'department')
         
-        # 构建响应数据
-        makers_list = [
-            {
+        # 按部门分组 - 部门已经是整数类型
+        department_groups = {}
+        for maker in makers:
+            dept = maker.department  # 直接获取整数部门值
+            
+            maker_info = {
                 "name": maker.real_name,
-                "maker_id": maker.maker_id,
-                "department": maker.department
+                "maker_id": maker.maker_id
             }
-            for maker in makers
-        ]
+            
+            if dept not in department_groups:
+                department_groups[dept] = []
+            department_groups[dept].append(maker_info)
+        
+        # 构建最终结果列表（按部门排序）
+        result_list = []
+        
+        # 定义部门顺序（基管0 -> 宣传1 -> 运维2 -> 项目3 -> 副会4 -> 会长5 -> 未分配999）
+        ordered_departments = [0, 1, 2, 3, 4, 5, 999]
+        
+        # 按照定义的部门顺序构建结果
+        for dept in ordered_departments:
+            if dept in department_groups:
+                result_list.append({
+                    "department": dept,
+                    "makers": department_groups[dept]
+                })
         
         return {
             "code": 200,
             "message": "successfully get all makers",
-            "list": makers_list
+            "list": result_list
         }
     
     except Exception as e:

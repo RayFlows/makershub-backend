@@ -38,6 +38,35 @@ async def get_arrangements(
         logger.error(f"获取排班安排失败: {str(e)}")
         raise HTTPException(status_code=500, detail="获取排班安排失败")
 
+@router.get("/get-current")
+async def get_current_arrangers(
+    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
+    service: ArrangeService = Depends(ArrangeService)
+):
+    """获取本次宣传部三个任务轮到的干事的信息"""
+    try:
+        logger.info(f"获取当前值班人员 | 用户: {user.userid}")
+        
+        # 调用服务层获取当前值班人员
+        current_makers = await service.get_current_makers()
+        
+        return {
+            "code": 200,
+            "message": "successfully get current maker",
+            "data": current_makers
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"获取当前值班人员失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": 500,
+                "message": "获取当前值班人员失败"
+            }
+        )
+
 # 批量创建排班安排
 @router.post("/arrangements/batch")
 async def batch_create_arrangements(

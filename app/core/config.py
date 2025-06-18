@@ -16,7 +16,8 @@ class Settings(pydantic.ConfigDict):
 
     
     # MinIO
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "146.56.227.73:9000")
+    # MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "146.56.227.73:9000")
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "resourse.makershub.cn")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_PUBLIC_URL: str = os.getenv("MINIO_PUBLIC_URL", "http://minio:9000")

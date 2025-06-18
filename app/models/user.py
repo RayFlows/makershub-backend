@@ -37,8 +37,8 @@ class User(BaseModel):
     # 用户权限级别: 0=普通用户, 1=干事(默认), 2=部长及以上
     role = IntField(default=1)
 
-    # 用户所属部门，默认为未分配
-    department = StringField(default="未分配")
+    # 用户所属部门，默认为999
+    department = IntField(default=999)
     
     # 用户真实姓名(可选)
     real_name = StringField(default="猫猫")

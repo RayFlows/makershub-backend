@@ -19,7 +19,7 @@ class Task(BaseModel):
     """
     
     task_id = StringField(required=True, unique=True)
-    department = StringField(required=True)
+    department = IntField(required=True)
     task_type = IntField(required=True)
     maker_id = StringField(required=True)
     name = StringField(required=True)

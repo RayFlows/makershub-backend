@@ -13,7 +13,7 @@ class TaskCreateRequest(BaseModel):
     """任务创建请求模型"""
     task_type: int
     name: str
-    department: str
+    department: int
     maker_id: str 
     content: str
     deadline: str
@@ -22,7 +22,7 @@ class TaskUpdateRequest(BaseModel):
     """任务更新请求模型"""
     task_type: Optional[int] = None
     name: Optional[str] = None
-    department: Optional[str] = None
+    department: Optional[int] = None
     content: Optional[str] = None
     deadline: Optional[str] = None
     maker_id: Optional[str] = None
