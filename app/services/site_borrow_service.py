@@ -522,12 +522,12 @@ class SiteBorrowService:
                 )
             
             # 检查当前用户是否是申请人
-            if application.userid != userid:
-                logger.warning(f"用户无权限归还该场地 | 当前用户: {userid} | 申请人: {application.userid}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="forbidden to return others' application"
-                )
+            # if application.userid != userid:
+            #     logger.warning(f"用户无权限归还该场地 | 当前用户: {userid} | 申请人: {application.userid}")
+            #     raise HTTPException(
+            #         status_code=403,
+            #         detail="forbidden to return others' application"
+            #     )
             
             # 检查申请状态是否为2（通过未归还）
             if application.state != 2:
