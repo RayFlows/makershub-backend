@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Path
+from fastapi import APIRouter, HTTPException, Depends, Path, Body
 from app.core.auth import require_permission_level
 from app.services.stuff_borrow_service import StuffBorrowService
 from pydantic import BaseModel
@@ -336,3 +336,64 @@ def cancel_stuff_borrow_application(
         print(f"取消申请失败: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"取消申请失败: {str(e)}")
+
+# 在 router = APIRouter() 下方添加以下模型和路由
+
+class StuffBorrowUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    student_id: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    grade: Optional[str] = None
+    major: Optional[str] = None
+    reason: Optional[str] = None
+    materials: Optional[List[str]] = None
+    start_time: Optional[str] = None
+    deadline: Optional[str] = None
+    type: Optional[int] = None
+    supervisor_name: Optional[str] = None
+    supervisor_phone: Optional[str] = None
+    project_number: Optional[str] = None
+
+
+@router.patch("/update/{sb_id}")
+def update_stuff_borrow_application(
+    sb_id: str = Path(..., description="借物申请ID"),
+    update_data: StuffBorrowUpdateRequest = Body(...),
+    user = Depends(require_permission_level(0))  # 普通用户权限
+):
+    """更新借物申请（只允许状态为已打回的申请）"""
+    print(f"=== 更新借物申请 {sb_id} ===")
+    try:
+        # 获取当前用户ID
+        user_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
+        if not user_id:
+            raise HTTPException(status_code=400, detail="无法获取用户ID")
+
+        # 记录用户发送的完整请求数据
+        print(f"[ROUTER DEBUG] 用户 {user_id} 请求更新借物申请 {sb_id}")
+        print(f"[ROUTER DEBUG] 完整请求数据: {update_data.dict()}")
+        
+        # 调用服务层更新
+        result = StuffBorrowService.update_stuff_borrow_application(
+            sb_id,
+            update_data.dict(exclude_unset=True),  # 只包含用户提供的字段
+            str(user_id)
+        )
+        print(f"[ROUTER DEBUG] 服务层返回结果: {result}")
+        return result
+
+    except ValueError as ve:
+        # 根据错误类型返回不同的HTTP状态码
+        if "不存在" in str(ve):
+            raise HTTPException(status_code=404, detail=str(ve))
+        elif "无权限" in str(ve) or "只有已打回的申请才能修改" in str(ve):
+            raise HTTPException(status_code=403, detail=str(ve))
+        elif "格式错误" in str(ve) or "物资占用失败" in str(ve):
+            raise HTTPException(status_code=400, detail=str(ve))
+        else:
+            raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        print(f"更新失败: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")

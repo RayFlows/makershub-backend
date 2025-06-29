@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from app.models.stuff_borrow import StuffBorrow
 from mongoengine.errors import ValidationError, NotUniqueError
 from datetime import datetime
+from loguru import logger
 import time
 import random
 import traceback
@@ -746,3 +747,296 @@ class StuffBorrowService:
             import traceback
             traceback.print_exc()
             raise Exception(f"取消申请操作失败: {str(e)}")
+
+    @staticmethod
+    def update_stuff_borrow_application(sb_id: str, update_data: dict, user_id: str) -> Dict[str, Any]:
+        """更新借物申请（允许状态为未审核和已打回的申请）"""
+        print(f"=== 开始更新借物申请 {sb_id} ===")
+        try:
+            # 详细记录用户发送的更新数据
+            print(f"[DEBUG] 用户 {user_id} 发送的完整更新数据: {update_data}")
+            
+            # 1. 获取原申请
+            application = StuffBorrow.objects(sb_id=sb_id).first()
+            if not application:
+                print(f"申请不存在: {sb_id}")
+                raise ValueError(f"借物申请不存在: {sb_id}")
+
+            # 2. 检查申请状态是否为未审核(0)或已打回(1)
+            if application.state not in [0, 1]:
+                status_map = {0: "未审核", 1: "已打回", 2: "已通过", 3: "已归还"}
+                current_status = status_map.get(application.state, "未知状态")
+                raise ValueError(f"只有未审核和已打回的申请才能修改，当前状态: {current_status}")
+
+            # 3. 检查申请是否属于当前用户
+            # if str(application.user_id) != user_id:
+            #     raise ValueError("无权限修改此申请")
+            
+            # 4. 记录原物资列表
+            old_stuff_list = application.stuff_list.copy() if application.stuff_list else []
+            new_stuff_list = None
+            stuff_changed = False
+            
+            # 5. 处理物资更新（如果有）
+            if 'materials' in update_data:
+                # 解析前端格式的物资列表
+                materials = update_data['materials']
+                new_stuff_list = []
+                for idx, material in enumerate(materials):
+                    new_stuff_list.append({
+                        "category": idx,
+                        "stuff": str(material)
+                    })
+                
+                # 标记物资有变更
+                stuff_changed = True
+                
+                # 6. 处理物资变更 - 分三步进行
+                print(f"[DEBUG] 开始处理物资变更: 状态={application.state}")
+                
+                # 第一步: 释放原物资（只有已打回状态的申请才需要释放）
+                if application.state in (0,1): 
+                    print("[DEBUG] 准备释放原物资占用")
+                    restore_result = StuffBorrowService._restore_old_stuff(old_stuff_list)
+                    print(f"[DEBUG] 原物资释放结果: 释放了 {restore_result['count']} 项物资")
+                
+                # 第二步: 检查新物资余量是否足够
+                borrow_check = StuffBorrowService._check_new_stuff_availability(new_stuff_list)
+                if borrow_check.get('failed_checks'):
+                    # 如果检查失败，且是已打回状态，需要重新占用原物资
+                    if application.state in (0,1):
+                        print("[DEBUG] 新物资余量不足，准备重新占用原物资")
+                        # 重新占用原物资（回滚释放操作）
+                        borrow_rollback = StuffBorrowService._borrow_new_stuff(old_stuff_list)
+                        print(f"[DEBUG] 回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
+                    
+                    error_msg = ", ".join(borrow_check['failed_checks'])
+                    print(f"[DEBUG] 新物资余量检查失败: {error_msg}")
+                    raise ValueError(f"新物资余量不足: {error_msg}")
+                else:
+                    print(f"[DEBUG] 新物资余量检查通过: {len(borrow_check['successful_checks'])}项物资可用")
+                
+                # 第三步: 实际占用新物资
+                print("[DEBUG] 实际占用新物资")
+                borrow_result = StuffBorrowService._borrow_new_stuff(new_stuff_list)
+                if borrow_result.get('failed_borrows'):
+                    # 如果占用失败，且是已打回状态，需要重新占用原物资
+                    if application.state == 1:
+                        print("[DEBUG] 新物资占用失败，准备重新占用原物资")
+                        borrow_rollback = StuffBorrowService._borrow_new_stuff(old_stuff_list)
+                        print(f"[DEBUG] 回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
+                    
+                    error_msg = ", ".join(borrow_result['failed_borrows'])
+                    print(f"[DEBUG] 新物资占用失败: {error_msg}")
+                    raise ValueError(f"物资占用失败: {error_msg}")
+                
+                # 更新申请中的物资列表
+                application.stuff_list = new_stuff_list
+                print(f"[DEBUG] 更新物资列表: 原物资: {old_stuff_list} → 新物资: {new_stuff_list}")
+
+            # 7. 更新其他字段（除了类型type）
+            # 基本字段
+            if 'name' in update_data:
+                application.name = str(update_data['name'])
+                print(f"[DEBUG] 更新姓名: {update_data['name']}")
+            
+            if 'student_id' in update_data:
+                application.student_id = str(update_data['student_id'])
+                print(f"[DEBUG] 更新学号: {update_data['student_id']}")
+            
+            if 'phone' in update_data:
+                application.phone_num = str(update_data['phone'])
+                print(f"[DEBUG] 更新电话: {update_data['phone']}")
+            
+            if 'email' in update_data:
+                application.email = str(update_data['email'])
+                print(f"[DEBUG] 更新邮箱: {update_data['email']}")
+            
+            if 'grade' in update_data:
+                application.grade = str(update_data['grade'])
+                print(f"[DEBUG] 更新年级: {update_data['grade']}")
+            
+            if 'major' in update_data:
+                application.major = str(update_data['major'])
+                print(f"[DEBUG] 更新专业: {update_data['major']}")
+            
+            if 'reason' in update_data:
+                application.reason = str(update_data['reason'])
+                print(f"[DEBUG] 更新原因: {update_data['reason']}")
+            
+            # 时间字段
+            if 'start_time' in update_data:
+                try:
+                    application.start_time = datetime.strptime(update_data['start_time'], '%Y-%m-%d')
+                    print(f"[DEBUG] 更新开始时间: {update_data['start_time']}")
+                except ValueError:
+                    raise ValueError("开始时间格式错误，应为 YYYY-MM-DD")
+            
+            if 'deadline' in update_data:
+                try:
+                    application.deadline = datetime.strptime(update_data['deadline'], '%Y-%m-%d')
+                    print(f"[DEBUG] 更新截止时间: {update_data['deadline']}")
+                except ValueError:
+                    raise ValueError("截止时间格式错误，应为 YYYY-%m-%d")
+            
+            # 团队借物字段（只有在类型为团队借物时才允许更新）
+            if application.type == 1:  # 团队借物
+                if 'supervisor_name' in update_data:
+                    application.supervisor_name = str(update_data['supervisor_name'])
+                    print(f"[DEBUG] 更新指导老师姓名: {update_data['supervisor_name']}")
+                
+                if 'supervisor_phone' in update_data:
+                    application.supervisor_phone = str(update_data['supervisor_phone'])
+                    print(f"[DEBUG] 更新指导老师电话: {update_data['supervisor_phone']}")
+                
+                if 'project_number' in update_data:
+                    application.project_number = str(update_data['project_number'])
+                    print(f"[DEBUG] 更新项目编号: {update_data['project_number']}")
+            
+            # 8. 状态处理
+            if stuff_changed:
+                # 状态重置为未审核
+                application.state = 0
+                print("[DEBUG] 物资变更后状态重置为未审核")
+            
+            # 9. 保存更新
+            application.save()
+            print(f"[DEBUG] 申请更新保存成功")
+            
+            # 10. 返回更新后的申请详情
+            result = StuffBorrowService.get_stuff_borrow_detail(sb_id)
+            print(f"[DEBUG] 更新后的申请详情: {result['data']}")
+            
+            return {
+                "code": 200,
+                "message": "借物申请更新成功",
+                "data": result['data']
+            }
+            
+        except ValueError as ve:
+            print(f"[ERROR] 业务错误: {str(ve)}")
+            raise ve
+        except Exception as e:
+            print(f"[ERROR] 更新借物申请失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"更新借物申请失败: {str(e)}")
+
+    # 辅助方法：释放原物资占用
+    @staticmethod
+    def _restore_old_stuff(stuff_list: list) -> dict:
+        """释放原物资占用"""
+        from app.models.stuff import Stuff
+        restored = []
+        
+        for item in stuff_list:
+            material_str = item['stuff']
+            # 解析物资字符串：格式为"类别 - 名称 - 数量"
+            parts = [p.strip() for p in material_str.split('-')]
+            if len(parts) < 3:
+                continue
+                
+            category = parts[0]
+            name = parts[1]
+            quantity = int(''.join(filter(str.isdigit, parts[2])))  # 提取数字部分
+            
+            # 查找匹配的物资
+            stuff = Stuff.objects(type=category, stuff_name=name).first()
+            if stuff:
+                # 恢复数量
+                old_remain = stuff.number_remain
+                stuff.number_remain += quantity
+                stuff.save()
+                restored.append({
+                    "stuff_name": name,
+                    "restored_quantity": quantity,
+                    "old_remain": old_remain,
+                    "new_remain": stuff.number_remain
+                })
+        
+        return {"restored_items": restored, "count": len(restored)}
+
+    # 在 StuffBorrowService 类中添加
+    @staticmethod
+    def _borrow_new_stuff(stuff_list: list) -> dict:
+        """实际占用新物资"""
+        from app.models.stuff import Stuff
+        successful_borrows = []
+        failed_borrows = []
+        
+        for item in stuff_list:
+            material_str = item['stuff']
+            # 解析物资字符串：格式为"类别 - 名称 - 数量"
+            parts = [p.strip() for p in material_str.split('-')]
+            if len(parts) < 3:
+                failed_borrows.append(f"物资格式错误: {material_str}")
+                continue
+                
+            category = parts[0]
+            name = parts[1]
+            quantity = int(''.join(filter(str.isdigit, parts[2])))
+            
+            # 查找匹配的物资
+            stuff = Stuff.objects(type=category, stuff_name=name).first()
+            if not stuff:
+                failed_borrows.append(f"物资不存在: {name}")
+                continue
+                
+            # 检查余量是否足够
+            if stuff.number_remain < quantity:
+                failed_borrows.append(f"{name} (剩余: {stuff.number_remain}, 需要: {quantity})")
+                continue
+            
+            # 实际占用物资
+            old_remain = stuff.number_remain
+            stuff.number_remain -= quantity
+            stuff.save()
+            
+            successful_borrows.append({
+                "stuff": material_str,
+                "old_remain": old_remain,
+                "new_remain": stuff.number_remain
+            })
+        
+        return {
+            "successful_borrows": successful_borrows,
+            "failed_borrows": failed_borrows
+        }
+    @staticmethod
+    def _check_new_stuff_availability(stuff_list: list) -> dict:
+        """检查新物资余量是否足够"""
+        from app.models.stuff import Stuff
+        successful_checks = []
+        failed_checks = []
+        
+        for item in stuff_list:
+            material_str = item['stuff']
+            parts = [p.strip() for p in material_str.split('-')]
+            if len(parts) < 3:
+                failed_checks.append(f"物资格式错误: {material_str}")
+                continue
+                
+            category = parts[0]
+            name = parts[1]
+            quantity = int(''.join(filter(str.isdigit, parts[2])))
+            
+            # 查找匹配的物资
+            stuff = Stuff.objects(type=category, stuff_name=name).first()
+            if not stuff:
+                failed_checks.append(f"物资不存在: {name}")
+                continue
+                
+            # 检查余量是否足够
+            if stuff.number_remain < quantity:
+                failed_checks.append(f"{name} (剩余: {stuff.number_remain}, 需要: {quantity})")
+                continue
+            
+            successful_checks.append({
+                "stuff": material_str,
+                "available_quantity": stuff.number_remain
+            })
+        
+        return {
+            "successful_checks": successful_checks,
+            "failed_checks": failed_checks
+        }
