@@ -440,6 +440,10 @@ class SiteBorrowService:
             # 记录实际更新的字段
             changed_fields = {}
             
+            # 保存更新前的场地信息（用于后续场地占用状态更新）
+            old_site_id = application.site_id
+            old_number = application.number
+
             # 遍历更新数据，只更新允许的字段
             for field, value in update_data.items():
                 if field in allowed_fields:
@@ -469,24 +473,64 @@ class SiteBorrowService:
                 application.save()
                 logger.info(f"申请已更新 | 申请ID: {apply_id} | 更新字段数: {len(changed_fields)}")
                 
+                # 检查场地是否变更
+                site_changed = ("site_id" in changed_fields or "number" in changed_fields)
+                same_site = (application.site_id == old_site_id and 
+                            application.number == old_number)
+
                 # 如果场地编号有变更，需要更新场地占用状态
-                if "number" in changed_fields or "site_id" in changed_fields:
+                # if "number" in changed_fields or "site_id" in changed_fields:
+                #     # 释放原场地
+                #     old_site = Site.objects(site_id=application.site_id, number=changed_fields.get("number", {}).get("old", application.number)).first()
+                #     if old_site:
+                #         old_site.is_occupied = False
+                #         old_site.save()
+                #         logger.info(f"原场地已释放 | 场地ID: {application.site_id} | 工位号: {changed_fields.get('number', {}).get('old', application.number)}")
+                    
+                #     # 占用新场地
+                #     new_site = Site.objects(site_id=application.site_id, number=application.number).first()
+                #     if new_site:
+                #         new_site.is_occupied = True
+                #         new_site.save()
+                #         logger.info(f"新场地已占用 | 场地ID: {application.site_id} | 工位号: {application.number}")
+                #     else:
+                #         logger.error(f"新场地不存在 | 场地ID: {application.site_id} | 工位号: {application.number}")
+            
+                # 只有当场地变更时才需要更新占用状态
+                if site_changed and not same_site:
                     # 释放原场地
-                    old_site = Site.objects(site_id=application.site_id, number=changed_fields.get("number", {}).get("old", application.number)).first()
+                    old_site = Site.objects(site_id=old_site_id, number=old_number).first()
                     if old_site:
                         old_site.is_occupied = False
                         old_site.save()
-                        logger.info(f"原场地已释放 | 场地ID: {application.site_id} | 工位号: {changed_fields.get('number', {}).get('old', application.number)}")
                     
-                    # 占用新场地
-                    new_site = Site.objects(site_id=application.site_id, number=application.number).first()
+                    # 检查新场地是否可用（排除自身占用）
+                    new_site = Site.objects(
+                        site_id=application.site_id, 
+                        number=application.number
+                    ).first()
+                    
                     if new_site:
+                        # 核心修复：检查场地是否被其他申请占用
+                        if new_site.is_occupied:
+                            # 查找当前占用者
+                            occupying_apply = SiteBorrow.objects(
+                                site_id=application.site_id,
+                                number=application.number,
+                                state__in=[0, 1, 2]  # 未审核/打回/通过未归还
+                            ).first()
+                            
+                            # 如果占用者不是自己，才报错
+                            if occupying_apply and occupying_apply.apply_id != apply_id:
+                                raise HTTPException(
+                                    status_code=409,
+                                    detail="该场地已被占用，请选择其他场地"
+                                )
+                        
+                        # 占用新场地
                         new_site.is_occupied = True
                         new_site.save()
-                        logger.info(f"新场地已占用 | 场地ID: {application.site_id} | 工位号: {application.number}")
-                    else:
-                        logger.error(f"新场地不存在 | 场地ID: {application.site_id} | 工位号: {application.number}")
-            
+                # 场地未变更时不做任何场地状态更新
             return (apply_id, changed_fields)
         except HTTPException as he:
             raise he

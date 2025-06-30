@@ -319,6 +319,17 @@ async def update_site_borrow_application(
     except Exception as e:
         logger.error(f"更新场地申请失败: {str(e)}")
         raise HTTPException(status_code=500, detail="update site-application failed")
+    except HTTPException as he:
+        # 新增 409 冲突处理
+        if he.status_code == 409:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "code": 409,
+                    "message": he.detail,
+                    "data": {"conflict_type": "site_occupied"}
+                }
+            )
 
 @router.patch("/return/{apply_id}")
 async def return_borrow_application(
