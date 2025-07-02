@@ -14,7 +14,7 @@ class StuffBorrowApplication(BaseModel):
     email: str
     grade: str
     major: str
-    content: str
+    reason: str
     deadline: str
     materials: List[str]
     type: int = 0

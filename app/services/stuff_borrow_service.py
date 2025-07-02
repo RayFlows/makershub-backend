@@ -58,7 +58,7 @@ class StuffBorrowService:
                 major=str(application_data.get('major')),
                 start_time=datetime.utcnow(),
                 deadline=deadline,
-                reason=str(application_data.get('content', '')),
+                reason=str(application_data.get('reason', '')),
                 state=0,
                 stuff_list=stuff_list
             )
