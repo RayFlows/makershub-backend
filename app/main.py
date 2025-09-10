@@ -27,7 +27,6 @@ from app.core.auth import AuthMiddleware  # 自定义认证中间件
 from app.services.event_service import EventService
 import json
 from app.routes import (
-    arrange_router,
     clean_router,
     duty_apply_router,
     duty_record_router,
