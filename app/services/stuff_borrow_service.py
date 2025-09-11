@@ -5,21 +5,42 @@ from datetime import datetime
 from loguru import logger
 import time
 import random
-import traceback
 
 class StuffBorrowService:
+    """物资借用服务类：处理物资借用相关的业务逻辑"""
     @staticmethod
     def create_stuff_borrow_application(application_data: Dict[str, Any]) -> Dict[str, Any]:
-        """创建借物申请"""
-        print("=== 服务层开始处理 ===")
+        """
+        创建物资借用申请
+        
+        Args:
+            application_data: 包含申请信息的字典
+                {
+                    "user_id": "用户ID",
+                    "type": 0,  # 0: 个人借物, 1: 团队借物
+                    "name": "申请人姓名",
+                    "student_id": "学号",
+                    "phone": "联系电话",
+                    "email": "邮箱",
+                    "grade": "年级",
+                    "major": "专业",
+                    "deadline": "归还时间",
+                    "reason": "借用原因",
+                    "materials": ["物资列表"]
+                }
+        
+        Returns:
+            Dict[str, Any]: 包含申请结果的字典
+        """
+        logger.info("开始处理物资借用申请")
         try:
-            print(f"S1. 收到申请数据: {application_data}")
+            logger.debug(f"收到申请数据: {application_data}")
             
             # 生成申请ID
             timestamp = int(time.time() * 1000)
             random_num = random.randint(100, 999)
             sb_id = f"SB{timestamp}{random_num}"
-            print(f"S2. 生成申请ID: {sb_id}")
+            logger.info(f"生成申请ID: {sb_id}")
             
             # 解析截止时间
             deadline_str = application_data.get('deadline')
@@ -27,9 +48,9 @@ class StuffBorrowService:
             if deadline_str:
                 try:
                     deadline = datetime.strptime(deadline_str, '%Y-%m-%d %H:%M:%S')
-                    print(f"S3. 解析截止时间成功: {deadline}")
+                    logger.debug(f"解析截止时间成功: {deadline}")
                 except ValueError as e:
-                    print(f"S3. 时间解析失败: {e}")
+                    logger.error(f"时间解析失败: {e}")
                     raise ValueError(f"时间格式错误: {deadline_str}")
             
             # 处理物资列表
@@ -40,10 +61,10 @@ class StuffBorrowService:
                     "category": i,
                     "stuff": str(material)
                 })
-            print(f"S4. 物资列表处理完成: {stuff_list}")
+            logger.debug(f"物资列表处理完成: {stuff_list}")
             
             # 创建记录
-            print("S5. 开始创建数据库记录...")
+            logger.info("开始创建数据库记录")
             
             # 基本字段
             new_application = StuffBorrow(
@@ -66,14 +87,14 @@ class StuffBorrowService:
             # 处理团队借物的额外字段
             borrow_type = int(application_data.get('type', 0))
             if borrow_type == 1:  # 团队借物
-                print("S5.1. 处理团队借物额外字段...")
+                logger.info("处理团队借物额外字段")
                 
                 # 获取团队借物的额外字段
                 project_number = application_data.get('project_number')
                 supervisor_name = application_data.get('supervisor_name')
                 supervisor_phone = application_data.get('supervisor_phone')
                 
-                print(f"S5.2. 团队借物字段: project_number={project_number}, supervisor_name={supervisor_name}, supervisor_phone={supervisor_phone}")
+                logger.debug(f"团队借物字段: project_number={project_number}, supervisor_name={supervisor_name}, supervisor_phone={supervisor_phone}")
                 
                 # 设置团队借物的额外字段
                 if project_number:
@@ -83,19 +104,19 @@ class StuffBorrowService:
                 if supervisor_phone:
                     new_application.supervisor_phone = str(supervisor_phone)
                     
-                print("S5.3. 团队借物字段设置完成")
+                logger.debug("团队借物字段设置完成")
             
-            print("S6. 模型对象创建完成，准备保存...")
+            logger.debug("模型对象创建完成，准备保存")
             new_application.save()
-            print(f"S7. 保存成功: {sb_id}")
+            logger.info(f"物资借用申请保存成功: {sb_id}")
             
             # 验证保存结果
             saved_record = StuffBorrow.objects(sb_id=sb_id).first()
             if saved_record and borrow_type == 1:
-                print(f"S8. 验证团队借物字段保存情况:")
-                print(f"  - project_number: {saved_record.project_number}")
-                print(f"  - supervisor_name: {saved_record.supervisor_name}")
-                print(f"  - supervisor_phone: {saved_record.supervisor_phone}")
+                logger.debug(f"验证团队借物字段保存情况:")
+                logger.debug(f"  - project_number: {saved_record.project_number}")
+                logger.debug(f"  - supervisor_name: {saved_record.supervisor_name}")
+                logger.debug(f"  - supervisor_phone: {saved_record.supervisor_phone}")
             
             return {
                 "code": 200,
@@ -107,14 +128,21 @@ class StuffBorrowService:
             }
             
         except Exception as e:
-            print(f"S8. 服务层异常: {str(e)}")
-            print("S9. 异常堆栈:")
-            traceback.print_exc()
+            logger.error(f"创建物资借用申请失败: {str(e)}")
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
             raise Exception(f"提交申请失败: {str(e)}")
 
     @staticmethod
     def get_user_stuff_borrow_list(user_id: str) -> Dict[str, Any]:
-        """获取特定用户的所有借物记录"""
+        """
+        获取特定用户的所有物资借用记录
+        
+        Args:
+            user_id: 用户ID
+        
+        Returns:
+            Dict[str, Any]: 包含用户借用记录列表的字典
+        """
         try:
             borrow_records = StuffBorrow.objects(user_id=user_id)
             
@@ -144,7 +172,15 @@ class StuffBorrowService:
 
     @staticmethod
     def get_stuff_borrow_detail(sb_id: str) -> Dict[str, Any]:
-        """获取借物申请详情"""
+        """
+        获取物资借用申请详情
+        
+        Args:
+            sb_id: 借用申请ID
+        
+        Returns:
+            Dict[str, Any]: 包含申请详情的字典
+        """
         try:
             borrow_record = StuffBorrow.objects(sb_id=sb_id).first()
             
@@ -189,7 +225,12 @@ class StuffBorrowService:
 
     @staticmethod
     def get_all_stuff_borrow_list() -> Dict[str, Any]:
-        """获取所有借物申请记录"""
+        """
+        获取所有物资借用申请记录
+        
+        Returns:
+            Dict[str, Any]: 包含所有借用记录列表的字典
+        """
         try:
             all_records = StuffBorrow.objects()
             
@@ -218,9 +259,23 @@ class StuffBorrowService:
             raise Exception(f"获取所有借物记录失败: {str(e)}")
     @staticmethod
     def review_stuff_borrow_application(review_data):
-        """审核借物申请"""
-        print(f"=== 服务层开始审核借物申请 ===")
-        print(f"审核数据: {review_data}")
+        """
+        审核物资借用申请
+        
+        Args:
+            review_data: 审核数据字典
+                {
+                    "borrow_id": "借用申请ID",
+                    "action": "approve/reject",  # 审核操作
+                    "reason": "审核理由",
+                    "reviewer_id": "审核人ID"
+                }
+        
+        Returns:
+            Dict[str, Any]: 审核结果
+        """
+        logger.info("开始审核物资借用申请")
+        logger.debug(f"审核数据: {review_data}")
         
         try: 
             borrow_id = review_data["borrow_id"] 
@@ -228,7 +283,7 @@ class StuffBorrowService:
             reason = review_data.get("reason", "")
             reviewer_id = review_data["reviewer_id"]
             
-            # ✅ 根据新定义映射审核操作到状态值
+            # 根据审核操作映射到状态值
             if action == "approve":
                 new_state = 2  # 已通过
             elif action == "reject":
@@ -236,33 +291,33 @@ class StuffBorrowService:
             else:
                 raise ValueError(f"无效的操作类型: {action}")
             
-            print(f"申请ID: {borrow_id}, 操作: {action}, 新状态: {new_state}")
+            logger.info(f"申请ID: {borrow_id}, 操作: {action}, 新状态: {new_state}")
             
             # 查询申请记录
             existing_application = StuffBorrow.objects(sb_id=borrow_id).first()
             if not existing_application:
-                print(f"申请不存在: {borrow_id}")
+                logger.warning(f"申请不存在: {borrow_id}")
                 raise ValueError(f"借物申请不存在: {borrow_id}")
             
-            print(f"[INFO] 找到申请记录，当前状态: {existing_application.state}")
+            logger.info(f"找到申请记录，当前状态: {existing_application.state}")
             
-            # ✅ 设置新状态
+            # 设置新状态
             existing_application.state = new_state
             existing_application.save()
-            print(f"[DEBUG] 状态保存完毕: {new_state}")
+            logger.debug(f"状态保存完毕: {new_state}")
             
-            # 可选：保存审核理由
+            # 保存审核理由
             if reason:
-                existing_application.review = reason  # 确保模型中有该字段
+                existing_application.review = reason
                 existing_application.save()
-                print(f"[DEBUG] 审核理由保存完毕: {reason}")
+                logger.debug(f"审核理由保存完毕: {reason}")
             
             # 验证保存成功
             updated_application = StuffBorrow.objects(sb_id=borrow_id).first()
             if updated_application.state != new_state:
                 raise Exception(f"状态更新失败！期望: {new_state}, 实际: {updated_application.state}")
             
-            print(f"[SUCCESS] 审核成功，新状态: {new_state}")
+            logger.info(f"审核成功，新状态: {new_state}")
             
             return {
                 "code": 200,
@@ -277,20 +332,32 @@ class StuffBorrowService:
             }
             
         except ValueError as ve:
-            print(f"[ERROR] 参数错误: {str(ve)}")
+            logger.error(f"参数错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"[ERROR] 服务层审核失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"审核物资借用申请失败: {str(e)}")
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
             raise Exception(f"审核操作失败: {str(e)}")
 
 
     @staticmethod
     def update_stuff_quantity_after_borrow(update_data):
-        """借物后更新物资余量"""
-        print(f"=== 服务层开始更新物资余量 ===")
-        print(f"更新数据: {update_data}")
+        """
+        借物后更新物资余量
+        
+        Args:
+            update_data: 更新数据字典
+                {
+                    "borrow_id": "借用申请ID",
+                    "stuff_updates": [物资更新列表],
+                    "operator_id": "操作员ID"
+                }
+        
+        Returns:
+            Dict[str, Any]: 更新结果
+        """
+        logger.info("开始更新物资余量")
+        logger.debug(f"更新数据: {update_data}")
         
         try:
             from app.models.stuff import Stuff
@@ -302,7 +369,7 @@ class StuffBorrowService:
             updated_stuff = []
             failed_updates = []
             
-            print(f"开始处理 {len(stuff_updates)} 个物资更新")
+            logger.info(f"开始处理 {len(stuff_updates)} 个物资更新")
             
             for update in stuff_updates:
                 stuff_id = update.get("stuff_id")
@@ -312,7 +379,7 @@ class StuffBorrowService:
                     failed_updates.append(f"无效的物资ID或数量: {update}")
                     continue
                 
-                print(f"更新物资: {stuff_id}, 减少数量: {quantity}")
+                logger.debug(f"更新物资: {stuff_id}, 减少数量: {quantity}")
                 
                 # 查找物资
                 stuff_item = Stuff.objects(stuff_id=stuff_id).first()
@@ -338,14 +405,14 @@ class StuffBorrowService:
                     "borrowed_quantity": quantity
                 })
                 
-                print(f"物资 {stuff_id} 更新成功: {old_remain} -> {stuff_item.number_remain}")
+                logger.debug(f"物资 {stuff_id} 更新成功: {old_remain} -> {stuff_item.number_remain}")
             
             # 更新借物申请状态为已借出
             borrow_application = StuffBorrow.objects(sb_id=borrow_id).first()
             if borrow_application:
                 borrow_application.state = 3  # 3 = 已借出
                 borrow_application.save()
-                print(f"借物申请 {borrow_id} 状态更新为已借出")
+                logger.info(f"借物申请 {borrow_id} 状态更新为已借出")
             
             return {
                 "code": 200,
@@ -361,16 +428,24 @@ class StuffBorrowService:
             }
             
         except Exception as e:
-            print(f"服务层更新物资余量失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"更新物资余量失败: {str(e)}")
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
             raise Exception(f"更新物资余量失败: {str(e)}")
 
     @staticmethod
     def auto_update_stuff_quantity_from_application(sb_id, operator_id):
-        """根据借物申请自动更新物资余量"""
-        print(f"=== 服务层开始自动更新物资余量 ===")
-        print(f"申请ID: {sb_id}")
+        """
+        根据借物申请自动更新物资余量
+        
+        Args:
+            sb_id: 借用申请ID
+            operator_id: 操作员ID
+        
+        Returns:
+            Dict[str, Any]: 更新结果
+        """
+        logger.info("开始根据借物申请自动更新物资余量")
+        logger.debug(f"申请ID: {sb_id}")
 
         try:
             from app.models.stuff import Stuff
@@ -385,18 +460,18 @@ class StuffBorrowService:
             if not borrow_application:
                 raise ValueError(f"借物申请不存在: {sb_id}")
 
-            print(f"[DEBUG] 当前申请状态: {borrow_application.state}")
+            logger.debug(f"当前申请状态: {borrow_application.state}")
 
             if borrow_application.state != 2:  # 2 = 已通过
                 raise ValueError(f"借物申请未通过审核，当前状态: {borrow_application.state}")
 
-            print(f"找到借物申请，物资列表: {borrow_application.stuff_list}")
+            logger.info(f"找到借物申请，物资列表: {borrow_application.stuff_list}")
 
             # 获取所有物资
             all_stuff = Stuff.objects()
-            print(f"[DEBUG] 数据库中共有 {len(all_stuff)} 个物资:")
+            logger.debug(f"数据库中共有 {len(all_stuff)} 个物资:")
             for stuff in all_stuff:
-                print(f"  - Type: {stuff.type}, 名称: '{stuff.stuff_name}', 余量: {stuff.number_remain}")
+                logger.debug(f"  - Type: {stuff.type}, 名称: '{stuff.stuff_name}', 余量: {stuff.number_remain}")
 
             updated_stuff = []
             failed_updates = []
@@ -404,7 +479,7 @@ class StuffBorrowService:
 
             # === 第一步：预校验每一项是否满足余量 ===
             for stuff_item in borrow_application.stuff_list:
-                print("stuff_item: ", stuff_item)
+                logger.debug(f"stuff_item: {stuff_item}")
 
                 match = re.match(r'^\s*(.+?)\s*-\s*(.+?)\s*-\s*(\d+)\s*$', stuff_item['stuff'])
                 if match:
@@ -429,11 +504,11 @@ class StuffBorrowService:
 
             # === 如果有任何不满足的，强制状态改为未审核，并返回错误 ===
             if insufficient_items:
-                print(f"[CHECK FAILED] 以下物资余量不足，取消扣减操作: {insufficient_items}")
+                logger.warning(f"以下物资余量不足，取消扣减操作: {insufficient_items}")
 
                 borrow_application.state = 0
                 borrow_application.save()
-                print("[ROLLBACK] 余量不足，已将申请状态重置为待审核 (state=0)")
+                logger.info("余量不足，已将申请状态重置为待审核 (state=0)")
 
                 return {
                     "code": 400,
@@ -468,15 +543,15 @@ class StuffBorrowService:
                             "borrowed_quantity": quantity
                         })
 
-                        print(f"[SUCCESS] 物资 {name} 更新成功: {old_remain} -> {stuff.number_remain}")
+                        logger.info(f"物资 {name} 更新成功: {old_remain} -> {stuff.number_remain}")
                         break
 
             # === 状态保持不变 ===
-            print(f"[INFO] 物资余量更新完成，申请状态保持为: {borrow_application.state}")
+            logger.info(f"物资余量更新完成，申请状态保持为: {borrow_application.state}")
 
-            print(f"[SUMMARY] 总物资: {len(borrow_application.stuff_list)}, 成功更新: {len(updated_stuff)}, 失败: {len(failed_updates)}")
+            logger.info(f"总物资: {len(borrow_application.stuff_list)}, 成功更新: {len(updated_stuff)}, 失败: {len(failed_updates)}")
             if failed_updates:
-                print(f"[FAILED_DETAILS] 失败原因: {failed_updates}")
+                logger.warning(f"失败原因: {failed_updates}")
 
             return {
                 "code": 200,
@@ -493,34 +568,40 @@ class StuffBorrowService:
             }
 
         except ValueError as ve:
-            print(f"参数错误: {str(ve)}")
+            logger.error(f"参数错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"服务层自动更新物资余量失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"服务层自动更新物资余量失败: {str(e)}", exc_info=True)
             raise Exception(f"自动更新物资余量失败: {str(e)}")
 
     @staticmethod
     def confirm_stuff_return(return_data):
-        """确认物资归还"""
-        print(f"=== 服务层开始确认物资归还 ===")
-        print(f"归还数据: {return_data}")
+        """
+        确认物资归还
+        
+        Args:
+            return_data (Dict[str, Any]): 归还数据
+        
+        Returns:
+            Dict[str, Any]: 归还确认结果
+        """
+        logger.info("开始确认物资归还")
+        logger.debug(f"归还数据: {return_data}")
         
         try:
             borrow_id = return_data["borrow_id"]
             return_notes = return_data.get("return_notes", "")
             operator_id = return_data["operator_id"]
             
-            print(f"申请ID: {borrow_id}, 操作员ID: {operator_id}")
+            logger.debug(f"申请ID: {borrow_id}, 操作员ID: {operator_id}")
             
             # 使用正确的字段名 sb_id 进行查询
             existing_application = StuffBorrow.objects(sb_id=borrow_id).first()
             if not existing_application:
-                print(f"借物申请不存在: {borrow_id}")
+                logger.error(f"借物申请不存在: {borrow_id}")
                 raise ValueError(f"借物申请不存在: {borrow_id}")
             
-            print(f"[INFO] 找到申请记录，当前状态: {existing_application.state}")
+            logger.info(f"找到申请记录，当前状态: {existing_application.state}")
             
             # 检查当前状态，只有已通过的申请才能归还
             if existing_application.state not in [2]:
@@ -537,19 +618,19 @@ class StuffBorrowService:
             # existing_application.return_time = datetime.now(timezone.utc)
             # existing_application.return_notes = return_notes
             
-            print(f"[DEBUG] 即将保存新状态到数据库: state = 3 (已归还)")
+            logger.debug("即将保存新状态到数据库: state = 3 (已归还)")
             existing_application.save()
-            print(f"[DEBUG] save() 执行完毕")
+            logger.debug("save() 执行完毕")
             
             # 重新查询确认状态已更新
             updated_application = StuffBorrow.objects(sb_id=borrow_id).first()
-            print(f"[DEBUG] 重新查询后的状态值: {updated_application.state}")
+            logger.debug(f"重新查询后的状态值: {updated_application.state}")
             
             if updated_application.state != 3:
-                print(f"[ERROR] 状态更新失败！期望: 3, 实际: {updated_application.state}")
+                logger.error(f"状态更新失败！期望: 3, 实际: {updated_application.state}")
                 raise Exception("状态更新失败")
             
-            print(f"归还确认成功，状态从 {old_state} 更新为 3")
+            logger.info(f"归还确认成功，状态从 {old_state} 更新为 3")
             
             return {
                 "code": 200,
@@ -564,18 +645,25 @@ class StuffBorrowService:
             }
             
         except ValueError as ve:
-            print(f"参数错误: {str(ve)}")
+            logger.error(f"参数错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"服务层归还确认失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"服务层归还确认失败: {str(e)}", exc_info=True)
             raise Exception(f"归还确认操作失败: {str(e)}")
     @staticmethod
     def restore_stuff_quantity_from_return(sb_id, operator_id):
-        """归还时恢复物资数量"""
-        print(f"=== 服务层开始恢复物资数量 ===")
-        print(f"申请ID: {sb_id}")
+        """
+        归还时恢复物资数量
+        
+        Args:
+            sb_id: 借用申请ID
+            operator_id: 操作员ID
+        
+        Returns:
+            Dict[str, Any]: 恢复结果
+        """
+        logger.info("开始恢复物资数量")
+        logger.debug(f"申请ID: {sb_id}")
         
         try:
             from app.models.stuff import Stuff
@@ -585,21 +673,21 @@ class StuffBorrowService:
             if not borrow_application:
                 raise ValueError(f"借物申请不存在: {sb_id}")
             
-            print(f"[DEBUG] 当前申请状态: {borrow_application.state}")
-            print(f"找到借物申请，物资列表: {borrow_application.stuff_list}")
+            logger.debug(f"当前申请状态: {borrow_application.state}")
+            logger.info(f"找到借物申请，物资列表: {borrow_application.stuff_list}")
             
             # 调试：查看数据库中所有物资
             all_stuff = Stuff.objects()
-            print(f"[DEBUG] 数据库中共有 {len(all_stuff)} 个物资:")
+            logger.debug(f"数据库中共有 {len(all_stuff)} 个物资:")
             for stuff in all_stuff:
-                print(f"  - ID: {stuff.stuff_id}, 类型: {stuff.type}, 名称: '{stuff.stuff_name}', 余量: {stuff.number_remain}")
+                logger.debug(f"  - ID: {stuff.stuff_id}, 类型: {stuff.type}, 名称: '{stuff.stuff_name}', 余量: {stuff.number_remain}")
             
             restored_stuff = []
             failed_restores = []
             
             # 处理申请中的物资列表
             for stuff_item in borrow_application.stuff_list:
-                print("stuff_item: ", stuff_item)
+                logger.debug(f"stuff_item: {stuff_item}")
                 import re
 
                 # stuff_item = {'category': 0, 'stuff': '开发板 - ESP-32-WROOM - 2'}
@@ -609,13 +697,13 @@ class StuffBorrowService:
                     category = match.group(1).strip()   # '开发板'
                     name = match.group(2).strip()       # 'ESP-32-WROOM'
                     quantity = int(match.group(3))      # '2' 转为整数
-                    print(f"解析物资: 类型='{category}', 名称='{name}', 数量={quantity}")
+                    logger.debug(f"解析物资: 类型='{category}', 名称='{name}', 数量={quantity}")
                 else:
-                    print("格式不匹配，跳过此物资")
+                    logger.warning("格式不匹配，跳过此物资")
                     failed_restores.append(f"物资格式不匹配: {stuff_item['stuff']}")
                     continue
 
-                print(f"处理物资归还: '{name}', 数量: {quantity}")
+                logger.info(f"处理物资归还: '{name}', 数量: {quantity}")
                 
                 if not name:
                     failed_restores.append("物资名称为空")
@@ -630,11 +718,11 @@ class StuffBorrowService:
                         stuff.number_remain += quantity  # 注意这里是加法，不是减法
                         stuff.save()
 
-                        print(f"stuff.stuff_id: {stuff.stuff_id}")
-                        print(f"stuff.number_remain (new): {stuff.number_remain}")
-                        print(f"stuff.stuff_name: {name}")
-                        print(f"old_remain: {old_remain}")
-                        print(f"quantity (restored): {quantity}")
+                        logger.debug(f"stuff.stuff_id: {stuff.stuff_id}")
+                        logger.debug(f"stuff.number_remain (new): {stuff.number_remain}")
+                        logger.debug(f"stuff.stuff_name: {name}")
+                        logger.debug(f"old_remain: {old_remain}")
+                        logger.debug(f"quantity (restored): {quantity}")
 
                         restored_stuff.append({
                             "stuff_id": stuff.stuff_id,
@@ -644,18 +732,18 @@ class StuffBorrowService:
                             "restored_quantity": quantity
                         })
                 
-                        print(f"[SUCCESS] 物资 {name} 数量恢复成功: {old_remain} -> {stuff.number_remain}")
+                        logger.info(f"物资 {name} 数量恢复成功: {old_remain} -> {stuff.number_remain}")
                         found = True
                         break
                 
                 if not found:
                     failed_restores.append(f"未找到匹配的物资: 类型={category}, 名称={name}")
-                    print(f"[WARNING] 未找到匹配的物资: {category} - {name}")
+                    logger.warning(f"未找到匹配的物资: {category} - {name}")
             
             # 打印详细的执行结果
-            print(f"[SUMMARY] 总物资: {len(borrow_application.stuff_list)}, 成功恢复: {len(restored_stuff)}, 失败: {len(failed_restores)}")
+            logger.info(f"总物资: {len(borrow_application.stuff_list)}, 成功恢复: {len(restored_stuff)}, 失败: {len(failed_restores)}")
             if failed_restores:
-                print(f"[FAILED_DETAILS] 失败原因: {failed_restores}")
+                logger.warning(f"失败原因: {failed_restores}")
             
             return {
                 "code": 200,
@@ -671,39 +759,46 @@ class StuffBorrowService:
             }
             
         except ValueError as ve:
-            print(f"参数错误: {str(ve)}")
+            logger.error(f"参数错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"服务层恢复物资数量失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"服务层恢复物资数量失败: {str(e)}", exc_info=True)
             raise Exception(f"恢复物资数量失败: {str(e)}")
     @staticmethod
     def cancel_stuff_borrow_application(sb_id: str, user_id: str) -> Dict[str, Any]:
-        """取消借物申请"""
-        print(f"=== 服务层开始取消借物申请 ===")
-        print(f"申请ID: {sb_id}, 用户ID: {user_id}")
+        """
+        取消借物申请
+        
+        Args:
+            sb_id (str): 借用申请ID
+            user_id (str): 用户ID
+        
+        Returns:
+            Dict[str, Any]: 取消结果
+        """
+        logger.info("开始取消借物申请")
+        logger.debug(f"申请ID: {sb_id}, 用户ID: {user_id}")
         
         try:
             # 查找借物申请
             borrow_application = StuffBorrow.objects(sb_id=sb_id).first()
             if not borrow_application:
-                print(f"借物申请不存在: {sb_id}")
+                logger.error(f"借物申请不存在: {sb_id}")
                 raise ValueError(f"借物申请不存在: {sb_id}")
             
-            print(f"[INFO] 找到申请记录，当前状态: {borrow_application.state}")
-            print(f"[INFO] 申请用户ID: {borrow_application.user_id}, 请求用户ID: {user_id}")
+            logger.info(f"找到申请记录，当前状态: {borrow_application.state}")
+            logger.debug(f"申请用户ID: {borrow_application.user_id}, 请求用户ID: {user_id}")
             
             # 验证申请是否属于当前用户
             if str(borrow_application.user_id) != str(user_id):
-                print(f"[ERROR] 权限验证失败")
+                logger.error("权限验证失败")
                 raise ValueError("无权限取消此申请")
             
             # 检查申请状态，只有未审核(0)和已打回(2)的申请可以取消
             if borrow_application.state not in [0, 2]:
                 status_map = {0: "未审核", 1: "已通过", 2: "已打回", 3: "已归还"}
                 current_status = status_map.get(borrow_application.state, "未知状态")
-                print(f"[ERROR] 当前状态不允许取消: {current_status}")
+                logger.error(f"当前状态不允许取消: {current_status}")
                 raise ValueError(f"当前状态不允许取消操作，当前状态: {current_status}")
             
             # 记录要删除的申请信息
@@ -716,19 +811,19 @@ class StuffBorrowService:
                 "stuff_count": len(borrow_application.stuff_list) if borrow_application.stuff_list else 0
             }
             
-            print(f"[INFO] 准备删除申请: {deleted_info}")
+            logger.info(f"准备删除申请: {deleted_info}")
             
             # 删除申请记录
             borrow_application.delete()
-            print(f"[SUCCESS] 申请 {sb_id} 已成功删除")
+            logger.info(f"申请 {sb_id} 已成功删除")
             
             # 验证删除结果
             check_deleted = StuffBorrow.objects(sb_id=sb_id).first()
             if check_deleted:
-                print(f"[ERROR] 删除验证失败，记录仍存在")
+                logger.error("删除验证失败，记录仍存在")
                 raise Exception("删除操作未成功执行")
             
-            print(f"[SUCCESS] 删除验证通过，记录已完全移除")
+            logger.info("删除验证通过，记录已完全移除")
             
             return {
                 "code": 200,
@@ -740,26 +835,34 @@ class StuffBorrowService:
             }
             
         except ValueError as ve:
-            print(f"参数错误: {str(ve)}")
+            logger.error(f"参数错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"服务层取消申请失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"服务层取消申请失败: {str(e)}", exc_info=True)
             raise Exception(f"取消申请操作失败: {str(e)}")
 
     @staticmethod
     def update_stuff_borrow_application(sb_id: str, update_data: dict, user_id: str) -> Dict[str, Any]:
-        """更新借物申请（允许状态为未审核和已打回的申请）"""
-        print(f"=== 开始更新借物申请 {sb_id} ===")
+        """
+        更新借物申请（允许状态为未审核和已打回的申请）
+        
+        Args:
+            sb_id (str): 借用申请ID
+            update_data (dict): 更新数据
+            user_id (str): 用户ID
+        
+        Returns:
+            Dict[str, Any]: 更新结果
+        """
+        logger.info(f"开始更新借物申请 {sb_id}")
         try:
             # 详细记录用户发送的更新数据
-            print(f"[DEBUG] 用户 {user_id} 发送的完整更新数据: {update_data}")
+            logger.debug(f"用户 {user_id} 发送的完整更新数据: {update_data}")
             
             # 1. 获取原申请
             application = StuffBorrow.objects(sb_id=sb_id).first()
             if not application:
-                print(f"申请不存在: {sb_id}")
+                logger.error(f"申请不存在: {sb_id}")
                 raise ValueError(f"借物申请不存在: {sb_id}")
 
             # 2. 检查申请状态是否为未审核(0)或已打回(1)
@@ -792,90 +895,90 @@ class StuffBorrowService:
                 stuff_changed = True
                 
                 # 6. 处理物资变更 - 分三步进行
-                print(f"[DEBUG] 开始处理物资变更: 状态={application.state}")
+                logger.debug(f"开始处理物资变更: 状态={application.state}")
                 
                 # 第一步: 释放原物资（只有已打回状态的申请才需要释放）
                 if application.state in (0,1): 
-                    print("[DEBUG] 准备释放原物资占用")
+                    logger.debug("准备释放原物资占用")
                     restore_result = StuffBorrowService._restore_old_stuff(old_stuff_list)
-                    print(f"[DEBUG] 原物资释放结果: 释放了 {restore_result['count']} 项物资")
+                    logger.debug(f"原物资释放结果: 释放了 {restore_result['count']} 项物资")
                 
                 # 第二步: 检查新物资余量是否足够
                 borrow_check = StuffBorrowService._check_new_stuff_availability(new_stuff_list)
                 if borrow_check.get('failed_checks'):
                     # 如果检查失败，且是已打回状态，需要重新占用原物资
                     if application.state in (0,1):
-                        print("[DEBUG] 新物资余量不足，准备重新占用原物资")
+                        logger.debug("新物资余量不足，准备重新占用原物资")
                         # 重新占用原物资（回滚释放操作）
                         borrow_rollback = StuffBorrowService._borrow_new_stuff(old_stuff_list)
-                        print(f"[DEBUG] 回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
+                        logger.debug(f"回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
                     
                     error_msg = ", ".join(borrow_check['failed_checks'])
-                    print(f"[DEBUG] 新物资余量检查失败: {error_msg}")
+                    logger.debug(f"新物资余量检查失败: {error_msg}")
                     raise ValueError(f"新物资余量不足: {error_msg}")
                 else:
-                    print(f"[DEBUG] 新物资余量检查通过: {len(borrow_check['successful_checks'])}项物资可用")
+                    logger.debug(f"新物资余量检查通过: {len(borrow_check['successful_checks'])}项物资可用")
                 
                 # 第三步: 实际占用新物资
-                print("[DEBUG] 实际占用新物资")
+                logger.debug("实际占用新物资")
                 borrow_result = StuffBorrowService._borrow_new_stuff(new_stuff_list)
                 if borrow_result.get('failed_borrows'):
                     # 如果占用失败，且是已打回状态，需要重新占用原物资
                     if application.state == 1:
-                        print("[DEBUG] 新物资占用失败，准备重新占用原物资")
+                        logger.debug("新物资占用失败，准备重新占用原物资")
                         borrow_rollback = StuffBorrowService._borrow_new_stuff(old_stuff_list)
-                        print(f"[DEBUG] 回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
+                        logger.debug(f"回滚原物资占用: 成功 {len(borrow_rollback['successful_borrows'])} 项")
                     
                     error_msg = ", ".join(borrow_result['failed_borrows'])
-                    print(f"[DEBUG] 新物资占用失败: {error_msg}")
+                    logger.debug(f"新物资占用失败: {error_msg}")
                     raise ValueError(f"物资占用失败: {error_msg}")
                 
                 # 更新申请中的物资列表
                 application.stuff_list = new_stuff_list
-                print(f"[DEBUG] 更新物资列表: 原物资: {old_stuff_list} → 新物资: {new_stuff_list}")
+                logger.debug(f"更新物资列表: 原物资: {old_stuff_list} → 新物资: {new_stuff_list}")
 
             # 7. 更新其他字段（除了类型type）
             # 基本字段
             if 'name' in update_data:
                 application.name = str(update_data['name'])
-                print(f"[DEBUG] 更新姓名: {update_data['name']}")
+                logger.debug(f"更新姓名: {update_data['name']}")
             
             if 'student_id' in update_data:
                 application.student_id = str(update_data['student_id'])
-                print(f"[DEBUG] 更新学号: {update_data['student_id']}")
+                logger.debug(f"更新学号: {update_data['student_id']}")
             
             if 'phone' in update_data:
                 application.phone_num = str(update_data['phone'])
-                print(f"[DEBUG] 更新电话: {update_data['phone']}")
+                logger.debug(f"更新电话: {update_data['phone']}")
             
             if 'email' in update_data:
                 application.email = str(update_data['email'])
-                print(f"[DEBUG] 更新邮箱: {update_data['email']}")
+                logger.debug(f"更新邮箱: {update_data['email']}")
             
             if 'grade' in update_data:
                 application.grade = str(update_data['grade'])
-                print(f"[DEBUG] 更新年级: {update_data['grade']}")
+                logger.debug(f"更新年级: {update_data['grade']}")
             
             if 'major' in update_data:
                 application.major = str(update_data['major'])
-                print(f"[DEBUG] 更新专业: {update_data['major']}")
+                logger.debug(f"更新专业: {update_data['major']}")
             
             if 'reason' in update_data:
                 application.reason = str(update_data['reason'])
-                print(f"[DEBUG] 更新原因: {update_data['reason']}")
+                logger.debug(f"更新原因: {update_data['reason']}")
             
             # 时间字段
             if 'start_time' in update_data:
                 try:
                     application.start_time = datetime.strptime(update_data['start_time'], '%Y-%m-%d')
-                    print(f"[DEBUG] 更新开始时间: {update_data['start_time']}")
+                    logger.debug(f"更新开始时间: {update_data['start_time']}")
                 except ValueError:
                     raise ValueError("开始时间格式错误，应为 YYYY-MM-DD")
             
             if 'deadline' in update_data:
                 try:
                     application.deadline = datetime.strptime(update_data['deadline'], '%Y-%m-%d')
-                    print(f"[DEBUG] 更新截止时间: {update_data['deadline']}")
+                    logger.debug(f"更新截止时间: {update_data['deadline']}")
                 except ValueError:
                     raise ValueError("截止时间格式错误，应为 YYYY-%m-%d")
             
@@ -883,29 +986,29 @@ class StuffBorrowService:
             if application.type == 1:  # 团队借物
                 if 'supervisor_name' in update_data:
                     application.supervisor_name = str(update_data['supervisor_name'])
-                    print(f"[DEBUG] 更新指导老师姓名: {update_data['supervisor_name']}")
+                    logger.debug(f"更新指导老师姓名: {update_data['supervisor_name']}")
                 
                 if 'supervisor_phone' in update_data:
                     application.supervisor_phone = str(update_data['supervisor_phone'])
-                    print(f"[DEBUG] 更新指导老师电话: {update_data['supervisor_phone']}")
+                    logger.debug(f"更新指导老师电话: {update_data['supervisor_phone']}")
                 
                 if 'project_number' in update_data:
                     application.project_number = str(update_data['project_number'])
-                    print(f"[DEBUG] 更新项目编号: {update_data['project_number']}")
+                    logger.debug(f"更新项目编号: {update_data['project_number']}")
             
             # 8. 状态处理
             if stuff_changed:
                 # 状态重置为未审核
                 application.state = 0
-                print("[DEBUG] 物资变更后状态重置为未审核")
+                logger.debug("物资变更后状态重置为未审核")
             
             # 9. 保存更新
             application.save()
-            print(f"[DEBUG] 申请更新保存成功")
+            logger.debug("申请更新保存成功")
             
             # 10. 返回更新后的申请详情
             result = StuffBorrowService.get_stuff_borrow_detail(sb_id)
-            print(f"[DEBUG] 更新后的申请详情: {result['data']}")
+            logger.debug(f"更新后的申请详情: {result['data']}")
             
             return {
                 "code": 200,
@@ -914,12 +1017,10 @@ class StuffBorrowService:
             }
             
         except ValueError as ve:
-            print(f"[ERROR] 业务错误: {str(ve)}")
+            logger.error(f"业务错误: {str(ve)}")
             raise ve
         except Exception as e:
-            print(f"[ERROR] 更新借物申请失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"更新借物申请失败: {str(e)}", exc_info=True)
             raise Exception(f"更新借物申请失败: {str(e)}")
 
     # 辅助方法：释放原物资占用

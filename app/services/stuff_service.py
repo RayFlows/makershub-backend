@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 from app.models.stuff import Stuff
 from mongoengine.errors import NotUniqueError, ValidationError
+from loguru import logger
 import time
 import random
 
@@ -80,7 +81,7 @@ class StuffService:
                     
                     # 检查是否已存在相同名称的物资
                     if StuffService._is_stuff_exists(type_name, detail.get("stuff_name")):
-                        print(f"警告: 物资 '{detail.get('stuff_name')}' 在类型 '{type_name}' 中已存在，跳过添加")
+                        logger.warning(f"物资 '{detail.get('stuff_name')}' 在类型 '{type_name}' 中已存在，跳过添加")
                         continue
                     
                     # 生成唯一的 stuff_id
@@ -99,7 +100,7 @@ class StuffService:
                     
                     new_stuff.save()
                     added_count += 1
-                    print(f"已添加物资: {detail.get('stuff_name')} (ID: {stuff_id})")
+                    logger.debug(f"已添加物资: {detail.get('stuff_name')} (ID: {stuff_id})")
             
             return {
                 "code": 200,
@@ -112,7 +113,7 @@ class StuffService:
         except NotUniqueError as e:
             raise ValueError("物品编号重复")
         except Exception as e:
-            print(f"添加物资时出错: {str(e)}")
+            logger.error(f"添加物资时出错: {str(e)}", exc_info=True)
             raise Exception(f"添加物资失败: {str(e)}")
 
     @staticmethod

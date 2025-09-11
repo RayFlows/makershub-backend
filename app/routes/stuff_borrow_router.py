@@ -3,7 +3,7 @@ from app.core.auth import require_permission_level
 from app.services.stuff_borrow_service import StuffBorrowService
 from pydantic import BaseModel
 from typing import List, Optional
-import traceback
+from loguru import logger
 
 router = APIRouter()
 
@@ -27,44 +27,59 @@ def submit_stuff_borrow_application(
     application: StuffBorrowApplication,
     user = Depends(require_permission_level(0))
 ):
-    """提交借物申请"""
-    print("=== 开始处理借物申请 ===")
+    """
+    提交借物申请
+    
+    Args:
+        application: 借物申请数据
+        user: 当前用户信息
+        
+    Returns:
+        Dict: 申请提交结果
+    """
+    logger.info("开始处理借物申请")
     try:
         # 使用 dict() 而不是 model_dump()
         application_dict = application.dict()
-        print(f"接收到申请: {application_dict}")
-        print(f"用户信息: {user}")
+        logger.debug(f"接收到申请: {application_dict}")
+        logger.debug(f"用户信息: {user}")
         
         # 从用户对象中获取 user_id，user 是 User 对象，不是字典
         user_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
-        print(f"提取的用户ID: {user_id}")
+        logger.debug(f"提取的用户ID: {user_id}")
         
         if not user_id:
-            print("错误: 无法获取用户ID")
+            logger.error("无法获取用户ID")
             raise HTTPException(status_code=400, detail="无法获取用户ID")
         
         # 准备申请数据
         application_dict["user_id"] = str(user_id)
-        print(f"准备调用服务层，数据: {application_dict}")
+        logger.debug(f"准备调用服务层，数据: {application_dict}")
         
         # 调用服务层
         result = StuffBorrowService.create_stuff_borrow_application(application_dict)
-        print(f"服务层返回结果: {result}")
+        logger.debug(f"服务层返回结果: {result}")
         
         return result
         
     except HTTPException as he:
-        print(f"HTTP异常: {he.detail}")
+        logger.error(f"HTTP异常: {he.detail}")
         raise he
     except Exception as e:
-        print(f"路由层错误: {str(e)}")
-        print("异常堆栈:")
-        traceback.print_exc()
+        logger.error(f"路由层错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"提交申请失败: {str(e)}")
 
 @router.get("/view")
 def view_user_stuff_borrow(user = Depends(require_permission_level(0))):
-    """获取用户所有借物列表"""
+    """
+    获取用户所有借物列表
+    
+    Args:
+        user: 当前用户信息
+        
+    Returns:
+        Dict: 用户借物列表
+    """
     try:
         user_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
         if not user_id:
@@ -74,6 +89,7 @@ def view_user_stuff_borrow(user = Depends(require_permission_level(0))):
         return result
         
     except Exception as e:
+        logger.error(f"获取用户借物列表失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -82,24 +98,44 @@ def get_stuff_borrow_detail(
     sb_id: str = Path(..., description="借物申请ID"),
     user = Depends(require_permission_level(0))
 ):
-    """获取借物申请详情"""
+    """
+    获取借物申请详情
+    
+    Args:
+        sb_id: 借物申请ID
+        user: 当前用户信息
+        
+    Returns:
+        Dict: 借物申请详情
+    """
     try:
         result = StuffBorrowService.get_stuff_borrow_detail(sb_id)
         return result
         
     except ValueError as e:
+        logger.warning(f"借物申请不存在: {sb_id}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"获取借物申请详情失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/view-all")
 def view_all_stuff_borrow(user = Depends(require_permission_level(1))):
-    """获取数据库全部的借物申请"""
+    """
+    获取数据库全部的借物申请
+    
+    Args:
+        user: 当前用户信息（需要管理员权限）
+        
+    Returns:
+        Dict: 所有借物申请列表
+    """
     try:
         result = StuffBorrowService.get_all_stuff_borrow_list()
         return result
         
     except Exception as e:
+        logger.error(f"获取所有借物申请失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 class ReviewRequest(BaseModel):
@@ -112,11 +148,20 @@ def review_stuff_borrow_application(
     review_data: ReviewRequest,
     user = Depends(require_permission_level(1))  # 需要管理员权限
 ):
-    """审核借物申请"""
-    print("=== 开始审核借物申请 ===")
+    """
+    审核借物申请
+    
+    Args:
+        review_data: 审核数据（包含申请ID、操作类型、理由等）
+        user: 当前用户信息（需要管理员权限）
+        
+    Returns:
+        Dict: 审核结果
+    """
+    logger.info("开始审核借物申请")
     try:
-        print(f"审核数据: {review_data.dict()}")
-        print(f"审核员: {user}")
+        logger.debug(f"审核数据: {review_data.dict()}")
+        logger.debug(f"审核员: {user}")
         
         # 获取审核员ID
         reviewer_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
@@ -139,20 +184,19 @@ def review_stuff_borrow_application(
             "reviewer_id": str(reviewer_id)
         }
         
-        print(f"调用服务层进行审核: {review_dict}")
+        logger.debug(f"调用服务层进行审核: {review_dict}")
         
         # 调用服务层进行审核
         result = StuffBorrowService.review_stuff_borrow_application(review_dict)
-        print(f"审核结果: {result}")
+        logger.debug(f"审核结果: {result}")
         
         return result
         
     except HTTPException as he:
-        print(f"HTTP异常: {he.detail}")
+        logger.error(f"HTTP异常: {he.detail}")
         raise he
     except Exception as e:
-        print(f"审核失败: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"审核失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"审核失败: {str(e)}")
 
 class UpdateStuffQuantityRequest(BaseModel):
@@ -163,10 +207,19 @@ def auto_update_stuff_quantity(
     sb_id: str = Path(..., description="借物申请ID"),
     user = Depends(require_permission_level(1))  # 需要管理员权限
 ):
-    """根据借物申请自动更新物资余量"""
-    print("=== 开始自动更新物资余量 ===")
+    """
+    根据借物申请自动更新物资余量
+    
+    Args:
+        sb_id: 借物申请ID
+        user: 当前用户信息（需要管理员权限）
+        
+    Returns:
+        Dict: 更新结果
+    """
+    logger.info("开始自动更新物资余量")
     try:
-        print(f"申请ID: {sb_id}")
+        logger.debug(f"申请ID: {sb_id}")
         
         # 获取操作员ID
         operator_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
@@ -175,16 +228,15 @@ def auto_update_stuff_quantity(
         
         # 调用服务层自动更新
         result = StuffBorrowService.auto_update_stuff_quantity_from_application(sb_id, str(operator_id))
-        print(f"自动更新结果: {result}")
+        logger.debug(f"自动更新结果: {result}")
         
         return result
         
     except HTTPException as he:
-        print(f"HTTP异常: {he.detail}")
+        logger.error(f"HTTP异常: {he.detail}")
         raise he
     except Exception as e:
-        print(f"自动更新物资余量失败: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"自动更新物资余量失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"自动更新物资余量失败: {str(e)}")
 
 class ReturnRequest(BaseModel):
@@ -205,10 +257,10 @@ def return_stuff_borrow_application(
     user = Depends(require_permission_level(1))  # 需要管理员权限
 ):
     """物资归还确认"""
-    print("=== 开始确认物资归还 ===")
+    logger.info("开始确认物资归还")
     try:
-        print(f"归还数据: {return_data.dict()}")
-        print(f"操作员: {user}")
+        logger.debug(f"归还数据: {return_data.dict()}")
+        logger.debug(f"操作员: {user}")
         
         # 获取操作员ID
         operator_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
@@ -222,34 +274,34 @@ def return_stuff_borrow_application(
             "operator_id": str(operator_id)
         }
         
-        print(f"调用服务层进行归还确认: {return_dict}")
+        logger.debug(f"调用服务层进行归还确认: {return_dict}")
         
         # 调用服务层进行归还确认
         result = StuffBorrowService.confirm_stuff_return(return_dict)
-        print(f"归还确认结果: {result}")
-        print(f"归还结果类型: {type(result)}")
+        logger.debug(f"归还确认结果: {result}")
+        logger.debug(f"归还结果类型: {type(result)}")
         
         # 检查归还是否成功
         is_return_successful = False
         if isinstance(result, dict):
             is_return_successful = result.get("code") == 200
-            print(f"字典结果判断成功: {is_return_successful}")
+            logger.debug(f"字典结果判断成功: {is_return_successful}")
         else:
-            print(f"非字典结果，类型: {type(result)}, 内容: {result}")
+            logger.debug(f"非字典结果，类型: {type(result)}, 内容: {result}")
             is_return_successful = True
         
-        print(f"最终判断归还是否成功: {is_return_successful}")
+        logger.debug(f"最终判断归还是否成功: {is_return_successful}")
         
         # 如果归还成功，恢复物资数量
         if is_return_successful:
-            print("=== 归还成功，开始恢复物资数量 ===")
+            logger.info("归还成功，开始恢复物资数量")
             try:
                 # 调用恢复物资数量的服务（注意：这里调用的是恢复数量的方法，不是减少数量的方法）
                 restore_result = StuffBorrowService.restore_stuff_quantity_from_return(
                     return_data.borrow_id, 
                     str(operator_id)
                 )
-                print(f"✅ 物资数量恢复成功: {restore_result}")
+                logger.info(f"物资数量恢复成功: {restore_result}")
                 
                 # 构造返回结果
                 return {
@@ -264,10 +316,7 @@ def return_stuff_borrow_application(
                 }
                 
             except Exception as restore_error:
-                print(f"❌ 物资数量恢复失败: {str(restore_error)}")
-                import traceback
-                print("详细错误信息:")
-                traceback.print_exc()
+                logger.error(f"物资数量恢复失败: {str(restore_error)}", exc_info=True)
                 
                 # 数量恢复失败不影响归还成功
                 return {
@@ -281,16 +330,14 @@ def return_stuff_borrow_application(
                     }
                 }
         else:
-            print("❌ 归还未成功，不执行数量恢复")
+            logger.warning("归还未成功，不执行数量恢复")
             return result
         
     except HTTPException as he:
-        print(f"HTTP异常: {he.detail}")
+        logger.error(f"HTTP异常: {he.detail}")
         raise he
     except Exception as e:
-        print(f"归还确认失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"归还确认失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"归还确认失败: {str(e)}")
 
 @router.post("/cancel/{sb_id}")
@@ -299,27 +346,27 @@ def cancel_stuff_borrow_application(
     user = Depends(require_permission_level(0))  # 普通用户权限即可
 ):
     """取消借物申请"""
-    print("=== 开始取消借物申请 ===")
+    logger.info("开始取消借物申请")
     try:
-        print(f"申请ID: {sb_id}")
-        print(f"用户信息: {user}")
+        logger.debug(f"申请ID: {sb_id}")
+        logger.debug(f"用户信息: {user}")
         
         # 获取用户ID
         user_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
         if not user_id:
-            print("错误: 无法获取用户ID")
+            logger.error("错误: 无法获取用户ID")
             raise HTTPException(status_code=400, detail="无法获取用户ID")
         
-        print(f"提取的用户ID: {user_id}")
+        logger.debug(f"提取的用户ID: {user_id}")
         
         # 调用服务层取消申请
         result = StuffBorrowService.cancel_stuff_borrow_application(sb_id, str(user_id))
-        print(f"取消申请结果: {result}")
+        logger.debug(f"取消申请结果: {result}")
         
         return result
         
     except ValueError as ve:
-        print(f"业务逻辑错误: {str(ve)}")
+        logger.warning(f"业务逻辑错误: {str(ve)}")
         # 根据错误类型返回不同的HTTP状态码
         if "不存在" in str(ve):
             raise HTTPException(status_code=404, detail=str(ve))
@@ -330,11 +377,10 @@ def cancel_stuff_borrow_application(
         else:
             raise HTTPException(status_code=400, detail=str(ve))
     except HTTPException as he:
-        print(f"HTTP异常: {he.detail}")
+        logger.error(f"HTTP异常: {he.detail}")
         raise he
     except Exception as e:
-        print(f"取消申请失败: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"取消申请失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"取消申请失败: {str(e)}")
 
 # 在 router = APIRouter() 下方添加以下模型和路由
@@ -362,8 +408,18 @@ def update_stuff_borrow_application(
     update_data: StuffBorrowUpdateRequest = Body(...),
     user = Depends(require_permission_level(0))  # 普通用户权限
 ):
-    """更新借物申请（只允许状态为已打回的申请）"""
-    print(f"=== 更新借物申请 {sb_id} ===")
+    """
+    更新借物申请（只允许状态为已打回的申请）
+    
+    Args:
+        sb_id: 借物申请ID
+        update_data: 更新数据
+        user: 当前用户信息（普通用户权限）
+        
+    Returns:
+        Dict: 更新结果
+    """
+    logger.info(f"开始更新借物申请 {sb_id}")
     try:
         # 获取当前用户ID
         user_id = getattr(user, 'user_id', None) or getattr(user, 'id', None) or str(user.id) if hasattr(user, 'id') else None
@@ -371,8 +427,8 @@ def update_stuff_borrow_application(
             raise HTTPException(status_code=400, detail="无法获取用户ID")
 
         # 记录用户发送的完整请求数据
-        print(f"[ROUTER DEBUG] 用户 {user_id} 请求更新借物申请 {sb_id}")
-        print(f"[ROUTER DEBUG] 完整请求数据: {update_data.dict()}")
+        logger.debug(f"用户 {user_id} 请求更新借物申请 {sb_id}")
+        logger.debug(f"完整请求数据: {update_data.dict()}")
         
         # 调用服务层更新
         result = StuffBorrowService.update_stuff_borrow_application(
@@ -380,7 +436,7 @@ def update_stuff_borrow_application(
             update_data.dict(exclude_unset=True),  # 只包含用户提供的字段
             str(user_id)
         )
-        print(f"[ROUTER DEBUG] 服务层返回结果: {result}")
+        logger.debug(f"服务层返回结果: {result}")
         return result
 
     except ValueError as ve:
@@ -394,6 +450,5 @@ def update_stuff_borrow_application(
         else:
             raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        print(f"更新失败: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"更新失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")

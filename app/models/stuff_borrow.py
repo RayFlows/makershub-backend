@@ -3,6 +3,12 @@ from mongoengine import StringField, IntField, DateTimeField, ListField, DictFie
 from datetime import datetime
 
 class StuffBorrow(BaseModel):
+    """
+    物资借用申请模型
+    
+    用于存储物资借用申请的相关信息，包括个人借物和团队借物两种类型。
+    支持申请状态管理、审核意见记录等功能。
+    """
     meta = {'collection': 'stuff_borrow'}
     
     sb_id = StringField(max_length=50, unique=True, required=True)
@@ -27,6 +33,12 @@ class StuffBorrow(BaseModel):
     supervisor_phone = StringField(max_length=20)
     
     def to_dict(self):
+        """
+        将模型实例转换为字典格式
+        
+        Returns:
+            Dict: 包含所有字段的字典，时间字段转换为ISO格式字符串
+        """
         return {
             'sb_id': self.sb_id,
             'user_id': self.user_id,
