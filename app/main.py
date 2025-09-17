@@ -38,7 +38,8 @@ from app.routes import (
     stuff_borrow_router,
     task_router,
     arrange_router,
-    user_router
+    user_router,
+    admin_router
 )
 import asyncio
 # 初始化FastAPI应用
@@ -196,6 +197,14 @@ async def shutdown_event():
     logger.info("应用关闭 - 已断开MongoDB连接")
 
 # API路由注册：将各个模块的路由挂载到应用上
+
+# 注册管理员路由
+app.include_router(
+    admin_router.router,  # 管理员相关API路由
+    prefix="/admin/api",  # 使用独立的前缀避免冲突
+    tags=["管理员后台"]    # API文档分类标签
+)
+
 app.include_router(
     user_router.router,  # 用户相关API路由
     prefix="/users",     # 路由前缀

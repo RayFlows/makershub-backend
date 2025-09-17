@@ -87,6 +87,16 @@ services:
       - makerhub-network
     restart: on-failure # 只在失败时重启
 
+  admin-frontend:
+    build: ./admin-frontend
+    container_name: makerhub-admin
+    ports:
+      - "3001:80"  # 改为3001避免冲突
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - makerhub-network
 
 networks:
   makerhub-network:
