@@ -39,7 +39,7 @@ const SiteManagement = () => {
   });
 
   // ========== API调用函数 ==========
-  const API_BASE = 'http://localhost:8000/admin/api/site';
+  const API_BASE = 'https://mini.makershub.cn/admin/api/site';
   
   const getAuthHeader = () => {
     const token = localStorage.getItem('adminToken');

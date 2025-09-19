@@ -4,7 +4,7 @@
  * 处理所有与后端管理员API的通信
  */
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.REACT_APP_API_URL || 'https://mini.makershub.cn';
 
 class AdminApiService {
   /**

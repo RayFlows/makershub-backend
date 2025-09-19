@@ -30,7 +30,7 @@ const UserManagement = () => {
   const [editData, setEditData] = useState({});
 
   // ========== API调用函数 ==========
-  const API_BASE = 'http://localhost:8000/admin/api/user';
+  const API_BASE = 'https://mini.makershub.cn/admin/api/user';
   
   const getAuthHeader = () => {
     const token = localStorage.getItem('adminToken');
