@@ -87,11 +87,26 @@ services:
       - makerhub-network
     restart: on-failure # 只在失败时重启
 
+  # admin-frontend:
+  #   build: ./admin-frontend
+  #   container_name: makerhub-admin
+  #   ports:
+  #     - "3001:80"  # 改为3001避免冲突
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped
+  #   networks:
+  #     - makerhub-network
+
   admin-frontend:
     build: ./admin-frontend
     container_name: makerhub-admin
     ports:
-      - "3001:80"  # 改为3001避免冲突
+      - "3001:3000"          # 映射到 dev-server 的 3000
+    volumes:
+      - ./admin-frontend:/app   # 源码挂进去
+      - /app/node_modules       # 防止宿主机 node_modules 覆盖
+    command: npm start           # 覆盖 Dockerfile 的 nginx
     depends_on:
       - backend
     restart: unless-stopped
