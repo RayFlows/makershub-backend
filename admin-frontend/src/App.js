@@ -1,6 +1,9 @@
+// admin-frontend/src/App.js
 import React, { useState, useEffect } from 'react';
+import adminApi from './api/adminApi';
+import StuffManagement from './components/StuffManagement';
 
-// 样式定义
+// 样式定义（保持不变）
 const styles = {
   container: {
     minHeight: '100vh',
@@ -165,34 +168,14 @@ const styles = {
   dropdownItemHover: {
     background: '#f5f5f5',
   },
-};
-
-// 模拟认证服务
-const authService = {
-  login: (username, password) => {
-    const ADMIN_USERNAME = 'admin';
-    const ADMIN_PASSWORD = 'MakerHub@2024';
-    
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-      const token = btoa(`${username}:${Date.now()}`);
-      localStorage.setItem('adminToken', token);
-      localStorage.setItem('adminUser', username);
-      return { success: true, token };
-    }
-    return { success: false, message: '用户名或密码错误' };
-  },
-  
-  logout: () => {
-    localStorage.removeItem('adminToken');
-    localStorage.removeItem('adminUser');
-  },
-  
-  isAuthenticated: () => {
-    return !!localStorage.getItem('adminToken');
-  },
-  
-  getUser: () => {
-    return localStorage.getItem('adminUser') || 'Admin';
+  errorMessage: {
+    color: '#ff4d4f',
+    marginBottom: '16px',
+    fontSize: '14px',
+    padding: '8px',
+    background: '#fff2f0',
+    border: '1px solid #ffccc7',
+    borderRadius: '4px',
   }
 };
 
@@ -202,14 +185,33 @@ const LoginPage = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isHovered, setIsHovered] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const result = authService.login(username, password);
-    if (result.success) {
-      onLogin();
-    } else {
-      setError(result.message);
+    
+    if (!username || !password) {
+      setError('请输入用户名和密码');
+      return;
+    }
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      const result = await adminApi.login(username, password);
+      
+      if (result.success) {
+        console.log('Login successful');
+        onLogin();
+      } else {
+        setError(result.message || '登录失败');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError('网络错误，请确保后端服务正在运行');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -217,7 +219,7 @@ const LoginPage = ({ onLogin }) => {
     <div style={styles.loginPage}>
       <div style={styles.loginCard}>
         <h2 style={styles.loginTitle}>MakerHub 管理后台</h2>
-        <div>
+        <form onSubmit={handleSubmit}>
           <div style={styles.formGroup}>
             <label style={styles.label}>用户名</label>
             <input
@@ -226,6 +228,7 @@ const LoginPage = ({ onLogin }) => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="请输入管理员用户名"
+              disabled={loading}
             />
           </div>
           
@@ -237,26 +240,89 @@ const LoginPage = ({ onLogin }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="请输入管理员密码"
+              disabled={loading}
             />
           </div>
           
           {error && (
-            <div style={{ color: 'red', marginBottom: '16px', fontSize: '14px' }}>
+            <div style={styles.errorMessage}>
               {error}
             </div>
           )}
           
           <button
+            type="submit"
             style={{
               ...styles.button,
-              ...(isHovered ? styles.buttonHover : {})
+              ...(isHovered ? styles.buttonHover : {}),
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
-            onClick={handleSubmit}
+            disabled={loading}
           >
-            登录
+            {loading ? '登录中...' : '登录'}
           </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// 仪表盘组件
+const Dashboard = () => {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const result = await adminApi.getStats();
+        if (result && result.code === 200) {
+          setStats(result.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
+  if (loading) {
+    return <div>加载统计数据中...</div>;
+  }
+
+  return (
+    <div>
+      <h2>欢迎使用 MakerHub 管理后台</h2>
+      <p style={{ color: '#666', marginTop: '16px' }}>
+        请从左侧菜单选择要管理的模块
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginTop: '30px' }}>
+        <div style={{ ...styles.card, textAlign: 'center' }}>
+          <div style={{ fontSize: '32px' }}>📦</div>
+          <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>物资总数</div>
+          <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>
+            {stats?.stuff?.total || '-'}
+          </div>
+        </div>
+        <div style={{ ...styles.card, textAlign: 'center' }}>
+          <div style={{ fontSize: '32px' }}>🏢</div>
+          <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>场地总数</div>
+          <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>
+            {stats?.sites?.total || '-'}
+          </div>
+        </div>
+        <div style={{ ...styles.card, textAlign: 'center' }}>
+          <div style={{ fontSize: '32px' }}>👥</div>
+          <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>用户总数</div>
+          <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>
+            {stats?.users?.total || '-'}
+          </div>
         </div>
       </div>
     </div>
@@ -278,46 +344,14 @@ const MainLayout = () => {
   ];
 
   const handleLogout = () => {
-    authService.logout();
+    adminApi.logout();
     window.location.reload();
   };
 
   const renderContent = () => {
     const contents = {
-      dashboard: (
-        <div>
-          <h2>欢迎使用 MakerHub 管理后台</h2>
-          <p style={{ color: '#666', marginTop: '16px' }}>
-            请从左侧菜单选择要管理的模块
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginTop: '30px' }}>
-            <div style={{ ...styles.card, textAlign: 'center' }}>
-              <div style={{ fontSize: '32px' }}>📦</div>
-              <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>物资总数</div>
-              <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>--</div>
-            </div>
-            <div style={{ ...styles.card, textAlign: 'center' }}>
-              <div style={{ fontSize: '32px' }}>🏢</div>
-              <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>场地总数</div>
-              <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>--</div>
-            </div>
-            <div style={{ ...styles.card, textAlign: 'center' }}>
-              <div style={{ fontSize: '32px' }}>👥</div>
-              <div style={{ marginTop: '8px', fontSize: '18px', fontWeight: 'bold' }}>用户总数</div>
-              <div style={{ fontSize: '24px', color: '#6366f1', marginTop: '8px' }}>--</div>
-            </div>
-          </div>
-        </div>
-      ),
-      stuff: (
-        <div>
-          <h2>物资管理</h2>
-          <p style={{ color: '#999', marginTop: '16px' }}>
-            物资管理功能开发中...<br />
-            将支持：查看所有物资、添加新物资、编辑物资信息、删除物资
-          </p>
-        </div>
-      ),
+      dashboard: <Dashboard />,
+      stuff: <StuffManagement />,
       site: (
         <div>
           <h2>场地管理</h2>
@@ -391,8 +425,10 @@ const MainLayout = () => {
           </button>
           
           <div style={styles.userInfo} onClick={() => setShowDropdown(!showDropdown)}>
-            <div style={styles.avatar}>A</div>
-            <span>{authService.getUser()}</span>
+            <div style={styles.avatar}>
+              {adminApi.getUser().charAt(0).toUpperCase()}
+            </div>
+            <span>{adminApi.getUser()}</span>
           </div>
           
           {showDropdown && (
@@ -426,8 +462,17 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setIsAuthenticated(authService.isAuthenticated());
-    setLoading(false);
+    const checkAuth = async () => {
+      // 检查是否有token
+      if (adminApi.isAuthenticated()) {
+        // 验证token是否有效
+        const isValid = await adminApi.verifyToken();
+        setIsAuthenticated(isValid);
+      }
+      setLoading(false);
+    };
+
+    checkAuth();
   }, []);
 
   const handleLogin = () => {

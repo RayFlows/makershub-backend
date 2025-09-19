@@ -49,7 +49,7 @@ class Settings(pydantic.ConfigDict):
     WORKERS: int = int(os.getenv("WORKERS", "4"))
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "https://admin.makershub.cn"]
 
     # 微信小程序配置
     WECHAT_APPID = "wx4f3a36d5ea82ed7d"
