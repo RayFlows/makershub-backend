@@ -40,7 +40,8 @@ from app.routes import (
     arrange_router,
     user_router,
     admin_router,
-    admin_stuff_router
+    admin_stuff_router,
+    admin_site_router
 )
 import asyncio
 # 初始化FastAPI应用
@@ -210,6 +211,12 @@ app.include_router(
     admin_stuff_router.router,
     prefix="/admin/api/stuff",
     tags=["管理员物资管理"]
+)
+
+app.include_router(
+    admin_site_router.router,
+    prefix="/admin/api/site",
+    tags=["管理员场地管理"]
 )
 
 app.include_router(

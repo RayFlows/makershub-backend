@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import adminApi from './api/adminApi';
 import StuffManagement from './components/StuffManagement';
+import SiteManagement from './components/SiteManagement';
 
 // 样式定义（保持不变）
 const styles = {
@@ -352,15 +353,7 @@ const MainLayout = () => {
     const contents = {
       dashboard: <Dashboard />,
       stuff: <StuffManagement />,
-      site: (
-        <div>
-          <h2>场地管理</h2>
-          <p style={{ color: '#999', marginTop: '16px' }}>
-            场地管理功能开发中...<br />
-            将支持：查看所有场地、添加新场地、编辑场地信息、删除场地
-          </p>
-        </div>
-      ),
+      site: <SiteManagement />,
       user: (
         <div>
           <h2>用户管理</h2>
