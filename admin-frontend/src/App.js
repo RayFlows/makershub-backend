@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import adminApi from './api/adminApi';
 import StuffManagement from './components/StuffManagement';
 import SiteManagement from './components/SiteManagement';
+import UserManagement from './components/UserManagement';
 
 // 样式定义（保持不变）
 const styles = {
@@ -354,15 +355,7 @@ const MainLayout = () => {
       dashboard: <Dashboard />,
       stuff: <StuffManagement />,
       site: <SiteManagement />,
-      user: (
-        <div>
-          <h2>用户管理</h2>
-          <p style={{ color: '#999', marginTop: '16px' }}>
-            用户管理功能开发中...<br />
-            将支持：查看所有用户、封禁/解封用户、修改用户角色
-          </p>
-        </div>
-      ),
+      user: <UserManagement />
     };
     
     return contents[selectedMenu] || contents.dashboard;

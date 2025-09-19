@@ -41,7 +41,8 @@ from app.routes import (
     user_router,
     admin_router,
     admin_stuff_router,
-    admin_site_router
+    admin_site_router,
+    admin_user_router
 )
 import asyncio
 # 初始化FastAPI应用
@@ -217,6 +218,12 @@ app.include_router(
     admin_site_router.router,
     prefix="/admin/api/site",
     tags=["管理员场地管理"]
+)
+
+app.include_router(
+    admin_user_router.router,
+    prefix="/admin/api/user",
+    tags=["管理员用户管理"]
 )
 
 app.include_router(
