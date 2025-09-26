@@ -52,8 +52,8 @@ class Settings(pydantic.ConfigDict):
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "https://admin.makershub.cn"]
 
     # 微信小程序配置
-    WECHAT_APPID = "wx4f3a36d5ea82ed7d"
-    WECHAT_SECRET = "24b2a16a5981149b0287334beed24e88"
+    WECHAT_APPID = "wxca573bbd51ada80a"
+    WECHAT_SECRET = "f35b2368ea3cc826c0fe77f13f4c3be6"
     WECHAT_LOGIN_URL = "https://api.weixin.qq.com/sns/jscode2session"
 
     # 新添加的事件过期时间设置
