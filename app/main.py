@@ -20,28 +20,35 @@ from fastapi.middleware.cors import CORSMiddleware  # 用于处理跨域资源�
 from fastapi.responses import JSONResponse  # 用于返回JSON格式响应
 from fastapi.exceptions import RequestValidationError  # 请求参数验证错误类型
 from loguru import logger  # 高级日志记录工具
-from app.core.db import connect_to_mongodb, disconnect_from_mongodb  # 数据库连接管理
+from app.core.database import engine, Base  # 数据库连接管理
 from app.core.config import settings  # 应用配置
 from app.core.logging import setup_logging  # 日志配置
 from app.core.auth import AuthMiddleware  # 自定义认证中间件
-from app.services.event_service import EventService
+# from app.services.event_service import EventService
+from app.models import ( 
+    user, 
+    stuff, 
+    stuff_borrow, 
+    borrow_item
+) 
+# 导入所有模型以确保SQLAlchemy能识别它们
 import json
 from app.routes import (
-    clean_router,
-    duty_apply_router,
-    duty_record_router,
-    event_router,
-    publicity_link_router,
-    site_borrow_router,
-    site_router,
-    stuff_router, 
-    stuff_borrow_router,
-    task_router,
-    arrange_router,
+    # clean_router,
+    # duty_apply_router,
+    # duty_record_router,
+    # event_router,
+    # publicity_link_router,
+    # site_borrow_router,
+    # site_router,
+    # stuff_router, 
+    # stuff_borrow_router,
+    # task_router,
+    # arrange_router,
     user_router,
-    admin_router,
-    admin_stuff_router,
-    admin_site_router,
+    # admin_router,
+    # admin_stuff_router,
+    # admin_site_router,
     admin_user_router
 )
 import asyncio
@@ -176,49 +183,61 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def startup_event():
     """
     应用启动事件处理
-    
-    当FastAPI应用启动时:
-    1. 设置日志系统
-    2. 连接MongoDB数据库
+
+    在应用启动时执行初始化任务，包括：
+    1. 配置日志系统。
+    2. 初始化数据库，根据ORM模型创建所有尚不存在的表。
+    3. 启动后台定时任务。
     """
-    setup_logging()  # 配置日志系统
-    connect_to_mongodb()  # 连接MongoDB
+    setup_logging()
+
+    # --- 新的数据库初始化逻辑 ---
+    # 使用异步上下文管理器 `engine.begin()` 来获取一个连接和事务。
+    # 在这个块内，我们可以执行DDL（数据定义语言）命令，如创建表。
+    async with engine.begin() as conn:
+        # `Base.metadata.create_all`会检查数据库中是否存在所有继承自`Base`的模型所对应的表。
+        # 如果表不存在，它会自动生成并执行`CREATE TABLE`语句来创建它们。
+        # 注意：这不会处理表的修改或删除。在生产环境中，我们应使用Alembic这样的迁移工具
+        # 来管理数据库模式的演变，而不是依赖`create_all`。
+        await conn.run_sync(Base.metadata.create_all)
+
     # 启动后台清理任务
-    asyncio.create_task(cleanup_incomplete_events_task())
-    logger.info("应用启动 - 已连接到MongoDB并启动清理任务")
-    # logger.info("应用启动 - 已连接到MongoDB")
+    # asyncio.create_task(cleanup_incomplete_events_task())
+    # logger.info("应用启动 - 数据库表已初始化，清理任务已启动")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """
     应用关闭事件处理
-    
-    当FastAPI应用关闭时:
-    1. 断开MongoDB数据库连接
+
+    在应用关闭时执行清理任务，主要是安全地关闭数据库连接池。
     """
-    disconnect_from_mongodb()  # 断开MongoDB连接
-    logger.info("应用关闭 - 已断开MongoDB连接")
+    # --- 新的数据库关闭逻辑 ---
+    # `engine.dispose()`会关闭并丢弃引擎连接池中的所有连接。
+    # 这是一个优雅关闭的步骤，确保没有挂起的连接。
+    await engine.dispose()
+    logger.info("应用关闭 - 数据库连接池已关闭")
 
 # API路由注册：将各个模块的路由挂载到应用上
 
 # 注册管理员路由
-app.include_router(
-    admin_router.router,  # 管理员相关API路由
-    prefix="/admin/api",  # 使用独立的前缀避免冲突
-    tags=["管理员后台"]    # API文档分类标签
-)
+# app.include_router(
+#     admin_router.router,  # 管理员相关API路由
+#     prefix="/admin/api",  # 使用独立的前缀避免冲突
+#     tags=["管理员后台"]    # API文档分类标签
+# )
 
-app.include_router(
-    admin_stuff_router.router,
-    prefix="/admin/api/stuff",
-    tags=["管理员物资管理"]
-)
+# app.include_router(
+#     admin_stuff_router.router,
+#     prefix="/admin/api/stuff",
+#     tags=["管理员物资管理"]
+# )
 
-app.include_router(
-    admin_site_router.router,
-    prefix="/admin/api/site",
-    tags=["管理员场地管理"]
-)
+# app.include_router(
+#     admin_site_router.router,
+#     prefix="/admin/api/site",
+#     tags=["管理员场地管理"]
+# )
 
 app.include_router(
     admin_user_router.router,
@@ -231,67 +250,67 @@ app.include_router(
     prefix="/users",     # 路由前缀
     tags=["用户管理"]    # API文档分类标签
 )
-# 添加值班申请路由
-app.include_router(
-    duty_apply_router.router,  # 值班申请相关API路由
-    prefix="/duty-apply",      # 路由前缀
-    tags=["值班申请"]          # API文档分类标签
-)
+# # 添加值班申请路由
+# app.include_router(
+#     duty_apply_router.router,  # 值班申请相关API路由
+#     prefix="/duty-apply",      # 路由前缀
+#     tags=["值班申请"]          # API文档分类标签
+# )
 
-# 注册Event路由
-app.include_router(
-    event_router.router,  # event相关API路由
-    prefix="/events",     # 路由前缀
-    tags=["活动管理"]    # API文档分类标签
-)
+# # 注册Event路由
+# app.include_router(
+#     event_router.router,  # event相关API路由
+#     prefix="/events",     # 路由前缀
+#     tags=["活动管理"]    # API文档分类标签
+# )
 
-# 注册借物申请路由
-app.include_router(
-    stuff_borrow_router.router, 
-    prefix="/stuff-borrow", 
-    tags=["借物申请"]
-)
+# # 注册借物申请路由
+# app.include_router(
+#     stuff_borrow_router.router, 
+#     prefix="/stuff-borrow", 
+#     tags=["借物申请"]
+# )
 
-# 注册场地路由
-app.include_router(
-    site_router.router,
-    prefix="/site",
-    tags=["场地管理"]
-)
+# # 注册场地路由
+# app.include_router(
+#     site_router.router,
+#     prefix="/site",
+#     tags=["场地管理"]
+# )
 
-# 注册场地借用申请路由
-app.include_router(
-    site_borrow_router.router,
-    prefix="/sites-borrow",
-    tags=["场地借用申请"]
-)
+# # 注册场地借用申请路由
+# app.include_router(
+#     site_borrow_router.router,
+#     prefix="/sites-borrow",
+#     tags=["场地借用申请"]
+# )
 
-# 注册任务相关路由
-app.include_router(
-    task_router.router,  # 任务相关API路由
-    prefix="/tasks",     # 路由前缀
-    tags=["任务管理"]    # API文档分类标签
-)
-
-
-app.include_router(
-    publicity_link_router.router,  
-    prefix="/publicity-link",  
-    tags=["秀米链接"]  
-)
+# # 注册任务相关路由
+# app.include_router(
+#     task_router.router,  # 任务相关API路由
+#     prefix="/tasks",     # 路由前缀
+#     tags=["任务管理"]    # API文档分类标签
+# )
 
 
-app.include_router(
-    stuff_router.router,  # 排班相关API路由
-    prefix="/stuff",      # 路由前缀
-    tags=["物资管理"]       # API文档分类标签
-)
+# app.include_router(
+#     publicity_link_router.router,  
+#     prefix="/publicity-link",  
+#     tags=["秀米链接"]  
+# )
 
-app.include_router(
-    arrange_router.router,  # 排班相关API路由
-    prefix="/arrange",  # 路由前缀
-    tags=["学年工作安排"]        # API文档分类标签
-)
+
+# app.include_router(
+#     stuff_router.router,  # 排班相关API路由
+#     prefix="/stuff",      # 路由前缀
+#     tags=["物资管理"]       # API文档分类标签
+# )
+
+# app.include_router(
+#     arrange_router.router,  # 排班相关API路由
+#     prefix="/arrange",  # 路由前缀
+#     tags=["学年工作安排"]        # API文档分类标签
+# )
 
 # #健康检查端点：用于监控系统确认API是否正常运行
 @app.get("/health")
@@ -331,19 +350,19 @@ if __name__ == "__main__":
     )
 
 # 添加后台任务函数
-async def cleanup_incomplete_events_task():
-    """定期清理未完成的事件任务"""
-    event_service = EventService()
-    while True:
-        try:
-            # 每5分钟执行一次清理
-            result = await event_service.cleanup_incomplete_events()
-            if "cleaned" in result:
-                logger.info(f"清理未完成事件: {result['cleaned']}个")
-            elif "error" in result:
-                logger.error(f"清理任务出错: {result['error']}")
-        except Exception as e:
-            logger.error(f"清理任务异常: {str(e)}")
+# async def cleanup_incomplete_events_task():
+#     """定期清理未完成的事件任务"""
+#     event_service = EventService()
+#     while True:
+#         try:
+#             # 每5分钟执行一次清理
+#             result = await event_service.cleanup_incomplete_events()
+#             if "cleaned" in result:
+#                 logger.info(f"清理未完成事件: {result['cleaned']}个")
+#             elif "error" in result:
+#                 logger.error(f"清理任务出错: {result['error']}")
+#         except Exception as e:
+#             logger.error(f"清理任务异常: {str(e)}")
         
-        # 等待5分钟
-        await asyncio.sleep(300)  # 300秒 = 5分钟
+#         # 等待5分钟
+#         await asyncio.sleep(300)  # 300秒 = 5分钟

@@ -1,7 +1,8 @@
 # Dockerfile
 
 # 使用腾讯云加速的Python官方镜像
-FROM mirror.ccs.tencentyun.com/library/python:3.9-slim-bookworm
+# FROM mirror.ccs.tencentyun.com/library/python:3.9-slim-bookworm
+FROM python:3.10-slim-bookworm
 
 # 工作目录设置
 WORKDIR /app

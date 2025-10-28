@@ -1,4 +1,4 @@
-#docker-compose.yml
+# docker-compose.yml
 services:
   backend:
     build: .
@@ -7,12 +7,11 @@ services:
       - "8000:8000"
     env_file: .env
     volumes:
-      # - ./docker-entrypoint-init.d/images:/docker-entrypoint-init.d/images  # 添加，原因：init.sh 需要图片目录
-      - ./assets/default-images:/docker-entrypoint-init.d/images # 添加，原因：init.sh 需要图片目录
+      - ./assets/default-images:/docker-entrypoint-init.d/images
       - ./app:/app/app  # 开发环境热重载
       - ./logs:/app/logs  # 日志持久化
     depends_on:
-      mongo:
+      mysql: # <-- 修改：依赖于 mysql
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -25,24 +24,28 @@ services:
     networks:
       - makerhub-network
 
-  mongo:
-    image: mongo:5.0
-    container_name: makerhub-mongo
+  # --- Mongo 服务被移除 ---
+
+  # +++ 新增 MySQL 服务 +++
+  mysql:
+    image: mysql:8.0
+    container_name: makerhub-mysql
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "27017:27017"
+      - "3306:3306"
     volumes:
-      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
-      - ./data/mongo:/data/db  # 添加数据持久化卷
+      - ./data/mysql:/var/lib/mysql # 数据持久化
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro # 初始化脚本
     restart: unless-stopped
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - makerhub-network
 
@@ -52,11 +55,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-      # MINIO_BROWSER_REDIRECT_URL: http://localhost:9001  # 添加这行
-      MINIO_BROWSER_REDIRECT_URL: http://146.56.227.73:9001  # 修改，原因：替换为实际服务器 IP
+      MINIO_BROWSER_REDIRECT_URL: http://146.56.227.73:9001
     ports:
-      - "9000:9000"  # API Port
-      - "9001:9001"  # Console Port
+      - "9000:9000"
+      - "9001:9001"
     restart: unless-stopped
     command: server /data --console-address ":9001" --address ":9000"
     healthcheck:
@@ -66,7 +68,7 @@ services:
       retries: 3
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./data/minio:/data  # 添加数据持久化卷
+      - ./data/minio:/data
     networks:
       - makerhub-network
 
@@ -85,28 +87,18 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     networks:
       - makerhub-network
-    restart: on-failure # 只在失败时重启
-
-  # admin-frontend:
-  #   build: ./admin-frontend
-  #   container_name: makerhub-admin
-  #   ports:
-  #     - "3001:80"  # 改为3001避免冲突
-  #   depends_on:
-  #     - backend
-  #   restart: unless-stopped
-  #   networks:
-  #     - makerhub-network
+    restart: on-failure
 
   admin-frontend:
     build: ./admin-frontend
     container_name: makerhub-admin
+    user: "root"
     ports:
-      - "3001:3000"          # 映射到 dev-server 的 3000
+      - "3001:3000"
     volumes:
-      - ./admin-frontend:/app   # 源码挂进去
-      - /app/node_modules       # 防止宿主机 node_modules 覆盖
-    command: npm start           # 覆盖 Dockerfile 的 nginx
+      - ./admin-frontend:/app
+      - /app/node_modules
+    command: sh -c "chown -R root:root /app && npm start"
     depends_on:
       - backend
     restart: unless-stopped

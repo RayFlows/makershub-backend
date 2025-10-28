@@ -5,11 +5,10 @@ fastapi==0.95.0
 uvicorn[standard]==0.21.1
 starlette==0.26.1
 
-# Database
-motor==3.1.1
-mongoengine==0.27.0
-pymongo[srv]==4.5.0  # MongoDB URI支持
-dnspython==2.4.2     # MongoDB DNS解析
+# Database (SQLAlchemy)
+sqlalchemy[asyncio]==2.0.22 # 核心ORM库，并包含异步支持
+aiomysql==0.2.0             # MySQL的异步驱动
+alembic==1.12.1             # 数据库迁移工具
 
 # Storage
 minio==7.1.17
@@ -21,14 +20,14 @@ python-multipart==0.0.6
 PyJWT==2.7.0
 
 # Utils
-pydantic==1.10.7
+pydantic==1.10.7 # 注意：SQLAlchemy 2.0 对 pydantic v2 的兼容性更好，后续可考虑升级
 python-dotenv==1.0.0
 loguru==0.7.0
 aiohttp==3.8.4
 jinja2==3.1.2
 pytz==2023.3
 python-dateutil==2.8.2
-requests==2.31.0     # HTTP请求
+requests==2.31.0
 
 # Testing
 pytest==7.3.1

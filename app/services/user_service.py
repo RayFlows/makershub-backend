@@ -1,234 +1,246 @@
-#user_service.py
+# app/services/user_service.py
+"""
+用户服务类：处理与用户相关的所有业务逻辑
+[v2.0 SQLAlchemy 迁移版]
+"""
 from typing import Optional
-from app.models.user import User
-from app.core.auth import create_access_token
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
-import uuid
-from io import BytesIO
-from app.core.config import settings
-from app.core.db import minio_client
 from datetime import datetime
 import random
+from io import BytesIO
+
+from app.models.user import User
+from app.core.auth import create_access_token
+from app.core.config import settings
+from app.core.storage import minio_client
 
 class UserService:
     """
-    用户服务类：处理与用户相关的所有业务逻辑
-    
-    提供微信用户的创建、查询和信息更新等功能
+    用户服务类，封装了所有面向小程序用户的业务逻辑。
+    所有方法都接收一个AsyncSession对象来执行数据库操作。
     """
 
-    async def create_or_update_wx_user(self, openid: str) -> dict:
+    def _user_to_dict(self, user: User) -> Optional[dict]:
         """
-        创建或更新微信用户信息并生成访问令牌
+        辅助函数：将SQLAlchemy User ORM对象安全地转换为字典。
+        用于API响应序列化，以保持与旧接口的数据结构兼容。
         
         Args:
-            openid: 微信用户的唯一标识符
+            user: SQLAlchemy的User模型实例。
+        
+        Returns:
+            一个包含用户信息的字典，如果输入为None则返回None。
+        """
+        if not user:
+            return None
+        return {
+            "userid": user.userid,
+            "maker_id": user.maker_id,
+            "role": user.role,
+            "department": user.department,
+            "real_name": user.real_name,
+            "phone_num": user.phone_num,
+            "motto": user.motto,
+            "state": user.state,
+            "profile_photo": user.profile_photo,
+            "score": user.score,
+            "total_dutytime": user.total_dutytime,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None
+        }
+    
+    async def get_user_orm_by_id(self, db: AsyncSession, openid: str) -> Optional[User]:
+        """
+        根据openid获取用户的ORM实例。
+        这是一个内部使用的辅助方法，方便其他服务方法直接获取可操作的ORM对象。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            openid: 用户的微信openid。
             
         Returns:
-            dict: 包含状态码、用户令牌和用户信息的字典
+            User ORM实例，如果未找到则返回None。
+        """
+        stmt = select(User).where(User.userid == openid)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def create_or_update_wx_user(self, db: AsyncSession, openid: str) -> dict:
+        """
+        创建或更新微信用户信息并生成访问令牌。
+        这是用户通过微信登录时的核心业务逻辑。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            openid: 微信用户的唯一标识符。
             
-        Raises:
-            Exception: 数据库操作失败时抛出异常
+        Returns:
+            包含状态码、用户令牌和完整用户信息的字典。
         """
         try:
-            logger.info("开始处理微信用户") 
-
-            try:
-                # 查询用户是否已存在
-                user = User.objects(userid=openid).first()
-            except Exception as e:
-                logger.error(f"数据库要不没连上，要不就是连上了创建用户失败：{e}")
-                raise  # 重新抛出异常，让调用方处理
+            logger.info(f"开始处理微信用户: {openid}")
+            user = await self.get_user_orm_by_id(db, openid)
                 
-            logger.info("数据库查询完成")  
             if not user:
-                # 用户不存在，创建新用户
-                logger.info(f"创建新用户: {openid}")
-
-                # 生成唯一的maker_id (格式: MK + 年月日时分秒毫秒 + 随机数)
-                timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # 精确到毫秒
-                random_suffix = str(random.randint(100, 999))  # 3位随机数
+                logger.info(f"用户不存在，开始创建新用户: {openid}")
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
+                random_suffix = str(random.randint(100, 999))
                 maker_id = f"MK{timestamp}_{random_suffix}"
-
-                default_avatar = "default-profile-photo.jpg"  # 默认头像文件名
                 
-                user = User(
+                new_user = User(
                     userid=openid,
-                    maker_id=maker_id,  # 使用生成的唯一maker_id
-                    real_name="",  # 初始化为空字符串
-                    state=1,       # 1表示正常状态
-                    score=0,       # 初始积分为0
-                    role=1,        # 初始用户级别为1
-                    department=999,  # 初始部门为999(无部门)
-                    profile_photo=default_avatar,  # 初始化头像链接为空
-                    phone_num="",  # 初始化手机号为空
-                    motto="",       # 初始化个性签名为空
-                    total_dutytime=0  # 初始总值班时长为0
+                    maker_id=maker_id,
+                    real_name="",
+                    profile_photo="default-profile-photo.jpg"
+                    # 其他字段将使用模型中定义的默认值
                 )
-                user.save()
+                db.add(new_user)
+                await db.commit()
+                await db.refresh(new_user)
+                user = new_user
+                logger.info(f"新用户创建成功: {openid}")
             else:
                 logger.info(f"用户已存在: {openid}")
 
-            # 生成用户认证令牌
             token = create_access_token(openid)
+            user_info = self._user_to_dict(user)
+            
+            if not user_info:
+                 logger.error(f"在登录/创建后未能获取用户信息: {openid}")
+                 return {"code": 500, "message": "获取用户信息失败"}
+
             return {
-                "code": 200,  # 成功状态码
-                "data": {
-                    "token": token,
-                    "user_info": await self.get_user(openid),  # 获取完整用户信息
-                }
+                "code": 200,
+                "data": {"token": token, "user_info": user_info}
             }
         except Exception as e:
-            logger.error(f"微信用户处理失败: {e}")
-            raise e  # 向上层抛出异常
+            await db.rollback()
+            logger.error(f"处理微信用户失败: {e}", exc_info=True)
+            raise e
 
-    async def get_user(self, openid: str) -> Optional[dict]:
+    async def get_user(self, db: AsyncSession, openid: str) -> Optional[dict]:
         """
-        根据openid获取用户信息
+        根据openid获取并序列化用户信息。
         
         Args:
-            openid: 用户的微信openid
+            db: SQLAlchemy的异步数据库会话。
+            openid: 用户的微信openid。
             
         Returns:
-            Optional[dict]: 用户信息字典，未找到用户则返回None
+            用户信息字典，如果用户不存在则返回None。
         """
-        user = User.objects(userid=openid).first()
-        return user.to_dict() if user else None
+        user = await self.get_user_orm_by_id(db, openid)
+        return self._user_to_dict(user)
 
-    async def update_user_score(self, user_id: str, score_change: int) -> bool:
+    async def update_user_profile(self, db: AsyncSession, user: User, update_data: dict) -> User:
         """
-        更新用户积分
+        通用更新用户资料的方法。
         
         Args:
-            user_id: 用户ID
-            score_change: 积分变化值，可正可负
+            db: SQLAlchemy的异步数据库会话。
+            user: 要更新的User ORM实例。
+            update_data: 包含要更新字段和值的字典。
             
         Returns:
-            bool: 更新成功返回True，失败返回False
+            更新并刷新后的User ORM实例。
         """
         try:
-            user = User.objects(userid=user_id).first()
-            if user:
-                user.score += score_change  # 增加或减少用户积分
-                user.save()
-                return True
-            return False  # 用户不存在
-        except Exception:
-            return False  # 数据库操作失败
+            for field, value in update_data.items():
+                if hasattr(user, field):
+                    setattr(user, field, value)
+            
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            logger.info(f"用户资料更新成功: {user.userid}")
+            return user
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"更新用户资料失败: {e}", exc_info=True)
+            raise e
 
-    async def update_user_state(self, user_id: str, state: int) -> bool:
+    async def update_user_profile_photo(self, db: AsyncSession, user_id: str, photo_data: bytes) -> dict:
         """
-        更新用户状态
+        更新用户头像，包括上传文件到MinIO和更新数据库记录。
         
         Args:
-            user_id: 用户ID
-            state: 用户状态值(0:禁用, 1:正常)
+            db: SQLAlchemy的异步数据库会话。
+            user_id: 用户的openid。
+            photo_data: 头像文件的二进制数据。
             
         Returns:
-            bool: 更新成功返回True，失败返回False
+            包含操作结果和新头像URL的字典。
         """
         try:
-            user = User.objects(userid=user_id).first()
-            if user:
-                user.state = state
-                user.save()
-                return True
-            return False  # 用户不存在
-        except Exception:
-            return False  # 数据库操作失败
-        
-    async def update_user_realname(self, user_id: str, real_name: str) -> bool:
-        """
-        更新用户真实姓名
-        
-        Args:
-            user_id: 用户ID
-            real_name: 用户真实姓名
-            
-        Returns:
-            bool: 更新成功返回True，失败返回False
-        """
-        try:
-            user = User.objects(userid=user_id).first()
-            if user:
-                user.real_name = real_name
-                user.save()
-                return True
-            return False  # 用户不存在
-        except Exception:
-            return False  # 数据库操作失败
-
-    # user_service.py中修复的方法
-    async def update_user_profile_photo(self, user_id: str, photo_data: bytes) -> dict:
-        """
-        更新用户头像
-        
-        将头像上传到MinIO并更新用户记录中的头像URL
-        
-        Args:
-            user_id: 用户ID
-            photo_data: 头像二进制数据
-            
-        Returns:
-            dict: 包含成功状态和头像URL的字典
-        """
-        try:
-            # 检查用户是否存在
-            user = User.objects(userid=user_id).first()
+            user = await self.get_user_orm_by_id(db, user_id)
             if not user:
                 return {"success": False, "error": "User not found"}
                 
-            # 生成唯一文件名
             file_name = f"{user_id}.jpg"
             
-            # 上传到MinIO
-            minio_client.client.put_object(
-                settings.MINIO_BUCKETS["AVATARS"],  # 使用正确的存储桶
+            minio_client.upload_file(
+                photo_data,
                 file_name,
-                BytesIO(photo_data),
-                length=len(photo_data),
-                content_type="image/jpeg"
-            )
-            
-            # 获取签名URL (关键修复)
-            url_result = minio_client.get_file(
-                file_name, 
-                expire_seconds=3600,  # 使用数字3600而不是timedelta对象
+                content_type="image/jpeg",
                 bucket_type="AVATARS"
             )
             
+            url_result = minio_client.get_file(file_name, bucket_type="AVATARS")
             if "error" in url_result:
                 return {"success": False, "error": url_result["error"]}
-            # 更新用户资料
+
             user.profile_photo = file_name
-            user.save()
+            db.add(user)
+            await db.commit()
             
-            return {
-                "success": True, 
-                "url": url_result["url"]
-                # "url": result.get("url")
-            }
+            return {"success": True, "url": url_result["url"]}
         except Exception as e:
-            logger.error(f"更新用户头像失败: {e}")
+            await db.rollback()
+            logger.error(f"更新用户头像失败: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
-            
-    async def update_user_motto(self, user_id: str, motto: str) -> bool:
+
+    async def get_all_makers(self, db: AsyncSession) -> dict:
         """
-        更新用户个性签名
+        获取全部协会成员及编号，用于小程序端展示。
         
         Args:
-            user_id: 用户ID
-            motto: 用户个性签名
-            
+            db: SQLAlchemy的异步数据库会话。
+        
         Returns:
-            bool: 更新成功返回True，失败返回False
+            按部门分组的成员列表。
         """
         try:
-            user = User.objects(userid=user_id).first()
-            if user:
-                user.motto = motto
-                user.save()
-                return True
-            return False  # 用户不存在
-        except Exception:
-            return False  # 数据库操作失败
+            stmt = select(User.real_name, User.maker_id, User.department)\
+                .where(User.state == 1, User.role.in_([1, 2]))\
+                .order_by(User.department)
+
+            result = await db.execute(stmt)
+            makers = result.all()
+            
+            department_groups = {}
+            for maker in makers:
+                dept = maker.department
+                maker_info = {"name": maker.real_name, "maker_id": maker.maker_id}
+                if dept not in department_groups:
+                    department_groups[dept] = []
+                department_groups[dept].append(maker_info)
+            
+            result_list = []
+            ordered_departments = [0, 1, 2, 3, 4, 5, 999]
+            for dept in ordered_departments:
+                if dept in department_groups:
+                    result_list.append({
+                        "department": dept,
+                        "makers": department_groups[dept]
+                    })
+            
+            return {
+                "code": 200,
+                "message": "successfully get all makers",
+                "list": result_list
+            }
+        except Exception as e:
+            logger.error(f"获取协会成员列表失败: {e}", exc_info=True)
+            raise e

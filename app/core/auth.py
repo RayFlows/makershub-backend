@@ -11,9 +11,13 @@ from typing import Optional
 import jwt
 from fastapi import Request, HTTPException, Header, Depends
 from fastapi.security import HTTPBearer
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.models.user import User
-from loguru import logger
+from app.core.database import AsyncSessionLocal, get_db
 
 # 初始化HTTP Bearer安全方案，用于提取请求头中的Bearer令牌
 security = HTTPBearer()
@@ -102,23 +106,27 @@ class AuthMiddleware:
             if token.startswith("Bearer "):
                 logger.debug("Token starts with 'Bearer', extracting actual token part.")
                 token = token.split(" ")[1]
-            else:
-                logger.debug("Token does not start with 'Bearer', using as is.")
-            # 解码令牌获取用户ID
-            logger.debug(f"Decoding token: {token}")
-            userid = decode_token(token)
-            logger.debug(f"Decoded user ID: {userid}")
-            # 根据用户ID查询用户信息
-            logger.debug(f"Querying user with ID: {userid}")
-            user = User.objects(userid=userid).first()
+
+            userid = decode_token(token)    
+            if not userid:
+                 raise HTTPException(status_code=401, detail="Invalid token")
+            
+            # 我们不能在类方法中使用Depends，所以需要手动创建会话。
+            async with AsyncSessionLocal() as session:
+                stmt = select(User).where(User.userid == userid)
+                result = await session.execute(stmt)
+                user = result.scalar_one_or_none()
+
             if not user:
                 # 用户不存在，可能是令牌伪造或用户已被删除
-                logger.debug("User not found, raising 404 exception.")
+                logger.warning(f"User not found for userid: {userid}")
                 raise HTTPException(status_code=404, detail="User not found")
             return user
+        except HTTPException as e:
+            # 直接重新抛出已知的HTTP异常
+            raise e
         except Exception as e:
-            # 记录认证错误并抛出401异常
-            logger.error(f"Auth error: {e}")
+            logger.error(f"Auth error during get_current_user: {e}", exc_info=True)
             raise HTTPException(status_code=401, detail="Authentication failed")
 
     async def __call__(self, request: Request, call_next):
@@ -146,6 +154,8 @@ class AuthMiddleware:
         try:
             # 从请求头获取认证令牌
             token = request.headers.get("Authorization")
+            if not token:
+                raise HTTPException(status_code=401, detail="Authorization header missing")
             # 验证令牌并获取用户信息
             user = await self.get_current_user(token)
             # 将用户信息附加到请求状态中，供路由处理函数使用
@@ -175,33 +185,6 @@ def require_permission_level(required_level: int):
         一个依赖函数，用于检查用户权限
     """
     
-    # async def check_permission_level(
-    #     auth_level: int = Depends(AuthMiddleware.get_current_user)
-    # ):
-    #     """
-    #     检查用户权限等级
-        
-    #     依赖函数，检查当前认证用户的权限等级是否满足要求。
-        
-    #     Args:
-    #         auth_level: 通过AuthMiddleware获取的当前用户对象
-            
-    #     Returns:
-    #         通过验证的用户对象
-            
-    #     Raises:
-    #         HTTPException: 权限不足时抛出403异常
-    #     """
-    #     if auth_level.level < required_level:
-    #         # 用户权限等级不足，拒绝访问
-    #         logger.warning(f"⛔ 权限不足 | 用户: {current_user.userid} | 当前权限: {current_user.level} | 要求权限: {required_level}")
-    #         raise HTTPException(
-    #             status_code=403,
-    #             detail=f"需要权限等级 {required_level}, 当前等级 {auth_level.level}"
-    #         )
-    #     logger.info(f"✅ 权限验证通过 | 用户: {current_user.userid}")
-    #     return auth_level
-    # return check_permission_level
     async def check_permission_level(
         user: User = Depends(AuthMiddleware.get_current_user)  # 重命名参数为 user
     ):
