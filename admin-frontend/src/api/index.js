@@ -1,6 +1,11 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'https://mini.makershub.cn';
+const API_BASE = process.env.REACT_APP_API_URL;
+
+// 检查变量是否存在，如果不存在则在开发时报错，防止忘记配置
+if (!API_BASE) {
+  throw new Error("REACT_APP_API_URL is not defined. Please check your .env file.");
+}
 
 const api = axios.create({
   baseURL: `${API_BASE}/admin/api`,
