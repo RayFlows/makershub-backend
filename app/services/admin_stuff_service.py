@@ -14,8 +14,7 @@ import random
 from datetime import datetime
 
 from app.models.stuff import Stuff
-# TODO: 待Site模块迁移后，需要从这里导入Site模型
-# from app.models.site import Site
+from app.models.site import Site
 
 class AdminStuffService:
     """管理员物资服务类：处理管理员端物资相关的业务逻辑。"""
@@ -326,33 +325,31 @@ class AdminStuffService:
     async def _get_available_locations(db: AsyncSession) -> List[str]:
         """
         获取可用的场地列表。
+        [已修复]：现在从数据库动态获取所有不重复的场地名称。
         
         Args:
             db: SQLAlchemy的异步数据库会话。
         
         Returns:
-            场地名称列表。
+            List[str]: 场地名称列表。
         """
         try:
-            # TODO: 待Site模块迁移后，这里的查询需要修改为 `select(Site.site).distinct()`
-            # from app.models.site import Site
-            # stmt = select(Site.site).distinct()
-            # result = await db.execute(stmt)
-            # sites = result.scalars().all()
-
-            # 临时的硬编码实现
-            sites = ["i创街", "101", "208+"]
+            # 使用 select(Site.site).distinct() 来获取所有不重复的场地名称
+            stmt = select(Site.site).distinct().order_by(Site.site)
+            result = await db.execute(stmt)
+            sites = result.scalars().all()
             
             if sites:
-                logger.debug(f"获取到场地列表: {sites}")
+                logger.debug(f"从数据库动态获取到场地列表: {sites}")
                 return sites
             else:
-                default_sites = ["i创街", "101", "208+"]
-                logger.debug(f"场地列表为空，使用默认值: {default_sites}")
+                # 如果数据库中确实没有任何场地，可以返回一个空列表或默认值
+                default_sites = [] # 或者保持 ["i创街", "101", "208+"] 作为备用
+                logger.debug(f"数据库中无场地数据，返回空列表。")
                 return default_sites
         except Exception as e:
-            logger.warning(f"获取场地列表失败，使用默认值: {e}")
-            return ["i创街", "101", "208+"]
+            logger.warning(f"获取场地列表失败，将返回空列表: {e}")
+            return []
 
     @staticmethod
     def _get_available_cabinets() -> List[str]:

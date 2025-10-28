@@ -40,7 +40,7 @@ from app.routes import (
     # event_router,
     # publicity_link_router,
     # site_borrow_router,
-    # site_router,
+    site_router,
     stuff_router, 
     # stuff_borrow_router,
     # task_router,
@@ -48,7 +48,7 @@ from app.routes import (
     user_router,
     admin_router,
     admin_stuff_router,
-    # admin_site_router,
+    admin_site_router,
     admin_user_router
 )
 import asyncio
@@ -233,11 +233,11 @@ app.include_router(
     tags=["管理员物资管理"]
 )
 
-# app.include_router(
-#     admin_site_router.router,
-#     prefix="/admin/api/site",
-#     tags=["管理员场地管理"]
-# )
+app.include_router(
+    admin_site_router.router,
+    prefix="/admin/api/site",
+    tags=["管理员场地管理"]
+)
 
 app.include_router(
     admin_user_router.router,
@@ -271,12 +271,12 @@ app.include_router(
 #     tags=["借物申请"]
 # )
 
-# # 注册场地路由
-# app.include_router(
-#     site_router.router,
-#     prefix="/site",
-#     tags=["场地管理"]
-# )
+# 注册场地路由
+app.include_router(
+    site_router.router,
+    prefix="/site",
+    tags=["场地管理"]
+)
 
 # # 注册场地借用申请路由
 # app.include_router(
