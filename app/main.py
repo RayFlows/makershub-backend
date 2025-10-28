@@ -41,13 +41,13 @@ from app.routes import (
     # publicity_link_router,
     # site_borrow_router,
     # site_router,
-    # stuff_router, 
+    stuff_router, 
     # stuff_borrow_router,
     # task_router,
     # arrange_router,
     user_router,
     # admin_router,
-    # admin_stuff_router,
+    admin_stuff_router,
     # admin_site_router,
     admin_user_router
 )
@@ -227,11 +227,11 @@ async def shutdown_event():
 #     tags=["管理员后台"]    # API文档分类标签
 # )
 
-# app.include_router(
-#     admin_stuff_router.router,
-#     prefix="/admin/api/stuff",
-#     tags=["管理员物资管理"]
-# )
+app.include_router(
+    admin_stuff_router.router,
+    prefix="/admin/api/stuff",
+    tags=["管理员物资管理"]
+)
 
 # app.include_router(
 #     admin_site_router.router,
@@ -300,11 +300,11 @@ app.include_router(
 # )
 
 
-# app.include_router(
-#     stuff_router.router,  # 排班相关API路由
-#     prefix="/stuff",      # 路由前缀
-#     tags=["物资管理"]       # API文档分类标签
-# )
+app.include_router(
+    stuff_router.router,  # 物资相关API路由
+    prefix="/stuff",      # 路由前缀
+    tags=["物资管理"]       # API文档分类标签
+)
 
 # app.include_router(
 #     arrange_router.router,  # 排班相关API路由
