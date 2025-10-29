@@ -42,7 +42,7 @@ from app.routes import (
     # site_borrow_router,
     site_router,
     stuff_router, 
-    # stuff_borrow_router,
+    stuff_borrow_router,
     # task_router,
     # arrange_router,
     user_router,
@@ -265,11 +265,11 @@ app.include_router(
 # )
 
 # # 注册借物申请路由
-# app.include_router(
-#     stuff_borrow_router.router, 
-#     prefix="/stuff-borrow", 
-#     tags=["借物申请"]
-# )
+app.include_router(
+    stuff_borrow_router.router, 
+    prefix="/stuff-borrow", 
+    tags=["借物申请"]
+)
 
 # 注册场地路由
 app.include_router(
