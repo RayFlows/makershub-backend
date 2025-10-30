@@ -9,6 +9,7 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
+from loguru import logger
 
 # 从环境变量中获取数据库连接URL，这是连接数据库的唯一凭证
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -58,7 +59,15 @@ async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        finally:
-            # `async with`语句块会自动处理会话的关闭，包括在异常情况下的回滚。
-            # 所以这里不需要显式的 session.close()。
-            pass
+            # 如果路由函数执行完毕没有抛出任何HTTPException之外的异常，
+            # 我们在这里显式地提交由该会话管理的主事务。
+            logger.debug("[DB] Request finished successfully, committing transaction.")
+            await session.commit()
+            logger.success("[DB] Transaction committed.")
+        except Exception as e:
+            # 如果在请求处理过程中发生任何错误，回滚事务。
+            logger.error(f"[DB] An error occurred during request, rolling back transaction: {e}")
+            await session.rollback()
+            logger.warning("[DB] Transaction rolled back.")
+            # 重新抛出异常，以便FastAPI可以正确处理它
+            raise

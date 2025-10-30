@@ -305,9 +305,8 @@ class StuffBorrowService:
     @staticmethod
     async def handle_review_process(db: AsyncSession, sb_id: str, action: str, reason: str, reviewer_id: str) -> Dict[str, Any]:
         """
-        【最终核心事务】处理管理员的审核决定。
-        - 如果是'approve'，则在一个原子事务中完成库存检查、扣减和状态变更。
-        - 如果是'reject'，则仅变更状态。
+        【最终核心事务 - 修复所有错误版】处理管理员的审核决定。
+        这是一个原子性操作，确保审核、库存检查、库存扣减、状态变更要么全部成功，要么全部回滚。
         
         Args:
             db: SQLAlchemy的异步数据库会话。
@@ -320,30 +319,42 @@ class StuffBorrowService:
             操作结果的字典。
         """
         logger.info(f"管理员 {reviewer_id} 开始处理申请 {sb_id}，操作: {action}")
+        
+        # --- 在函数作用域顶部初始化返回值变量 ---
+        return_code = 500
+        return_message = "内部服务器错误"
+        return_data = {}
 
         if action == "approve":
-            # --- 批准操作：执行一个包含所有检查和修改的完整事务 ---
-            async with db.begin_nested() as transaction:
-                try:
-                    # 1. 获取并锁定申请记录，同时预加载关联的借用项
+            logger.debug(f"[{sb_id}] 进入 'approve' 分支。")
+            try:
+                logger.debug(f"[{sb_id}] 准备进入 'approve' 事务块。")
+                async with db.begin_nested() as transaction:
+                    logger.success(f"[{sb_id}] 成功进入 'approve' 事务块。")
+                    
+                    # 1. 获取并锁定申请记录
                     stmt = select(StuffBorrow).where(StuffBorrow.sb_id == sb_id)\
                         .options(selectinload(StuffBorrow.borrow_items)).with_for_update()
+                    logger.debug(f"[{sb_id}] [SQL-PREP] 准备执行申请记录的锁定查询。")
                     result = await db.execute(stmt)
                     application = result.scalar_one_or_none()
 
                     if not application: raise ValueError(f"借物申请不存在: {sb_id}")
                     if application.state != 0: raise ValueError(f"只有'未审核'的申请才能被批准。当前状态: {application.state}")
+                    logger.info(f"[{sb_id}] 成功锁定申请记录，当前状态: {application.state}。")
 
                     borrow_items = application.borrow_items
                     if not borrow_items: raise ValueError("申请中没有有效的物资项")
-
+                    
                     # 2. 锁定相关物资行
                     stuff_ids_to_lock = [item.stuff_id for item in borrow_items]
                     lock_stmt = select(Stuff).where(Stuff.stuff_id.in_(stuff_ids_to_lock)).with_for_update()
+                    logger.debug(f"[{sb_id}] [SQL-PREP] 准备执行物资库存的锁定查询，IDs: {stuff_ids_to_lock}。")
                     locked_stuff_result = await db.execute(lock_stmt)
                     locked_stuff_map = {s.stuff_id: s for s in locked_stuff_result.scalars().all()}
-                    
-                    # 3. 在锁定的安全环境中检查库存
+                    logger.info(f"[{sb_id}] 成功锁定 {len(locked_stuff_map)} 个物资记录。")
+
+                    # 3. 在安全上下文中检查库存
                     insufficient_items = []
                     for item in borrow_items:
                         stuff = locked_stuff_map.get(item.stuff_id)
@@ -351,67 +362,91 @@ class StuffBorrowService:
                             msg = f"物资 '{stuff.stuff_name if stuff else item.stuff_id}' 余量不足"
                             insufficient_items.append(msg)
                     
+                    # 4. 【关键修复】正确的 if/else 缩进结构
                     if insufficient_items:
-                        # 库存不足，将状态改为“已打回”并提交这个变更
+                        # 分支A：库存不足
+                        logger.warning(f"[{sb_id}] 库存不足，准备执行打回逻辑: {insufficient_items}")
+                        
+                        # 因为我们要返回错误，所以当前事务的目标是失败。我们手动回滚它。
+                        await transaction.rollback()
+                        logger.critical(f"[{sb_id}] [TRANSACTION] 库存不足分支：手动执行 rollback 完成。")
+                        
+                        # 在一个新的事务/会话状态中更新申请状态为“已打回”
                         application.state = 1
                         application.review = f"【系统自动打回】库存不足: {', '.join(insufficient_items)}"
                         db.add(application)
-                        # 事务在此处提交状态变更
-                        logger.warning(f"库存不足，申请 {sb_id} 已自动打回。")
-                        return {"code": 400, "message": "部分物资余量不足，申请已自动打回", "data": {"errors": insufficient_items}}
+                        logger.debug(f"[{sb_id}] 准备提交'自动打回'的状态变更。")
+                        await db.commit()
+                        logger.success(f"[{sb_id}] [TRANSACTION] '自动打回'的状态变更已提交。")
+                        
+                        # 准备错误返回值
+                        return_code = 400
+                        return_message = "部分物资余量不足，申请已自动打回"
+                        return_data = {"errors": insufficient_items}
+                    else:
+                        # 分支B：库存充足
+                        updated_stuff_log = []
+                        for item in borrow_items:
+                            stuff = locked_stuff_map[item.stuff_id]
+                            old_remain = stuff.number_remain # 记录旧库存用于日志
+                            stuff.number_remain -= item.quantity
+                            db.add(stuff)
+                            updated_stuff_log.append({"stuff_name": stuff.stuff_name, "borrowed": item.quantity, "old_remain": old_remain, "new_remain": stuff.number_remain})
+                            logger.info(f"[{sb_id}] 物资 '{stuff.stuff_name}' 库存在会话中更新: {old_remain} -> {stuff.number_remain}")
 
-                    # 4. 库存充足，扣减库存并更新申请状态
-                    updated_stuff_log = []
-                    for item in borrow_items:
-                        stuff = locked_stuff_map[item.stuff_id]
-                        old_remain = stuff.number_remain
-                        stuff.number_remain -= item.quantity
-                        db.add(stuff)
-                        updated_stuff_log.append({"stuff_name": stuff.stuff_name, "borrowed": item.quantity})
-                    
-                    application.state = 2 # 已通过
-                    application.review = reason or "审核通过"
-                    db.add(application)
+                        application.state = 2
+                        application.review = reason or "审核通过"
+                        db.add(application)
+                        
+                        logger.info(f"[{sb_id}] 所有变更已暂存，事务即将提交。")
+                        
+                        # 准备成功返回值
+                        return_code = 200
+                        return_message = "审核通过，库存已成功扣减"
+                        return_data = {"updated_stuff": updated_stuff_log}
 
-                    logger.info(f"申请 {sb_id} 审核通过，库存已扣减，事务即将提交。")
-                    # 事务将在 async with 块结束时自动提交
-                    return {"code": 200, "message": "审核通过，库存已成功扣减", "data": {"updated_stuff": updated_stuff_log}}
-                
-                except (ValueError, NoResultFound) as e:
-                    await transaction.rollback()
-                    logger.warning(f"审核批准失败 - 业务错误: {e}")
-                    raise e
-                except Exception as e:
-                    await transaction.rollback()
-                    logger.error(f"审核批准事务失败: {e}", exc_info=True)
-                    raise e
+                # `async with` 块在这里退出。如果执行的是分支B，事务会自动提交。
+                logger.success(f"[{sb_id}] [TRANSACTION] 'approve' 事务块已成功退出。")
+            
+            except Exception as e:
+                logger.error(f"[{sb_id}] 'approve' 分支的 try 块中捕获到异常: {e}", exc_info=True)
+                # 向上抛出异常，让路由层统一处理并返回500错误
+                raise e
 
         elif action == "reject":
-            # --- 打回操作：一个简单的状态更新事务 ---
-            async with db.begin_nested() as transaction:
-                try:
+            logger.debug(f"[{sb_id}] 进入 'reject' 分支。")
+            try:
+                # 打回操作是一个独立的简单事务
+                async with db.begin_nested() as transaction:
+                    logger.success(f"[{sb_id}] 成功进入 'reject' 事务块。")
                     stmt = select(StuffBorrow).where(StuffBorrow.sb_id == sb_id)
                     result = await db.execute(stmt)
                     application = result.scalar_one_or_none()
                     if not application: raise ValueError(f"借物申请不存在: {sb_id}")
                     if application.state != 0: raise ValueError(f"只有'未审核'的申请才能被打回。当前状态: {application.state}")
                     
-                    application.state = 1 # 已打回
+                    application.state = 1
                     application.review = reason
                     db.add(application)
-                    
-                    logger.info(f"申请 {sb_id} 已打回，事务即将提交。")
-                    return {"code": 200, "message": "申请已成功打回", "data": {"borrow_id": sb_id, "new_state": 1}}
-                except (ValueError, NoResultFound) as e:
-                    await transaction.rollback()
-                    raise e
-                except Exception as e:
-                    await transaction.rollback()
-                    logger.error(f"审核打回事务失败: {e}", exc_info=True)
-                    raise e
+                    logger.info(f"[{sb_id}] 申请已设置为'打回'，准备退出 'async with' 块并自动提交。")
+                
+                logger.success(f"[{sb_id}] [TRANSACTION] 'reject' 的 'async with' 块已无异常地执行完毕，事务应该已自动提交。")
+                
+                # 准备成功返回值
+                return_code = 200
+                return_message = "申请已成功打回"
+                return_data = {"borrow_id": sb_id, "new_state": 1}
+
+            except Exception as e:
+                logger.error(f"[{sb_id}] 'reject' 分支的 try 块中捕获到异常: {e}", exc_info=True)
+                raise e
         else:
             raise ValueError(f"无效的操作类型: {action}")
 
+        # --- 所有逻辑分支最终汇合到这里返回 ---
+        logger.info(f"[{sb_id}] 函数执行完毕，准备返回最终结果。Code: {return_code}, Message: {return_message}")
+        return {"code": return_code, "message": return_message, "data": return_data}
+        
     @staticmethod
     async def confirm_stuff_return(db: AsyncSession, return_data: dict) -> Dict[str, Any]:
         """
@@ -539,8 +574,11 @@ class StuffBorrowService:
             更新结果的字典。
         """
         logger.info(f"用户 {user_id} 开始更新借物申请 {sb_id}")
+        
+        # 将整个更新操作包裹在一个事务中
         async with db.begin_nested() as transaction:
             try:
+                # 1. 获取并锁定申请记录
                 stmt = select(StuffBorrow).where(StuffBorrow.sb_id == sb_id)\
                     .options(selectinload(StuffBorrow.borrow_items)).with_for_update()
                 result = await db.execute(stmt)
@@ -550,13 +588,34 @@ class StuffBorrowService:
                 if application.state not in [0, 1]: raise ValueError("只有未审核和已打回的申请才能修改")
                 if application.user_id != user_id: raise ValueError("无权限修改此申请")
 
-                # 更新非物资字段
+                # 2. 更新非物资字段
                 for field, value in update_data.items():
-                    if field != 'materials' and hasattr(application, field):
+                    if field == 'materials': continue
+                    
+                    # --- 【关键修复 1】处理时间字符串 ---
+                    if field in ['start_time', 'deadline'] and isinstance(value, str):
+                        parsed_time = None
+                        # 尝试多种常见格式
+                        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+                            try:
+                                parsed_time = datetime.strptime(value, fmt)
+                                # 如果只匹配到日期，时间部分默认为 00:00:00
+                                break # 成功解析后退出循环
+                            except ValueError:
+                                continue # 尝试下一个格式
+                        
+                        if parsed_time is None:
+                            # 如果所有格式都尝试失败
+                            raise ValueError(f"时间格式无法识别: {field}='{value}'. 请使用 'YYYY-MM-DD HH:MM:SS' 或 'YYYY-MM-DD'")
+                        
+                        value = parsed_time # 使用解析后的 datetime 对象
+                    
+                    if hasattr(application, field):
                         db_field = 'phone_num' if field == 'phone' else field
                         setattr(application, db_field, value)
+                        logger.debug(f"在会话中更新字段 {db_field}: {value}")
                 
-                # 如果物资列表有变更
+                # 3. 如果物资列表有变更... (这部分逻辑不变)
                 if 'materials' in update_data:
                     logger.info(f"检测到物资列表变更，开始事务性更新...")
                     
@@ -582,17 +641,24 @@ class StuffBorrowService:
                     application.borrow_items = new_borrow_items
                     logger.info("新的物资列表已在会话中关联。")
 
-                application.state = 0 # 任何修改都将状态重置为“未审核”
+                # 4. 状态重置为“未审核”
+                application.state = 0
                 db.add(application)
                 
+                logger.info("所有变更已暂存，事务即将提交。")
+                
             except (ValueError, Exception) as e:
+                # 事务将自动回滚
                 logger.error(f"更新借物申请事务失败，将回滚: {e}", exc_info=True)
                 raise e
 
+        # --- 【关键修复 2】在事务成功提交后，重新查询详情 ---
+        # 此时数据库中的数据已经是最新且类型正确的
         logger.info("更新事务成功，正在获取最新的申请详情...")
         updated_detail_response = await StuffBorrowService.get_stuff_borrow_detail(db, sb_id)
         
         return {
-            "code": 200, "message": "借物申请更新成功",
+            "code": 200,
+            "message": "借物申请更新成功",
             "data": updated_detail_response['data']
-        }    
+        }
