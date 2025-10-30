@@ -55,7 +55,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-      MINIO_BROWSER_REDIRECT_URL: http://146.56.227.73:9001
+      MINIO_BROWSER_REDIRECT_URL: https://frp-dog.com:57286  #minio:9001的反向代理域名，用于网页前端访问的
     ports:
       - "9000:9000"
       - "9001:9001"

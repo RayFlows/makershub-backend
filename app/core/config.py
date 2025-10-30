@@ -17,10 +17,10 @@ class Settings(pydantic.ConfigDict):
     
     # MinIO
     # MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "146.56.227.73:9000")
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "resourse.makershub.cn")
-    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-    MINIO_PUBLIC_URL: str = os.getenv("MINIO_PUBLIC_URL", "http://minio:9000")
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT")
+    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY")
+    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY")
+    MINIO_PUBLIC_URL: str = os.getenv("MINIO_PUBLIC_URL")
     # config.py 中添加多个存储桶配置
     MINIO_BUCKETS: Dict[str, str] = {
         "AVATARS": os.getenv("MINIO_AVATAR_BUCKET", "makerhub-avatars"),
