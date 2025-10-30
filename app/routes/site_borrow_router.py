@@ -1,250 +1,43 @@
-from fastapi import APIRouter, HTTPException, Depends
-from app.services.site_borrow_service import SiteBorrowService
-from app.core.auth import require_permission_level#, get_current_user
+# app/routes/site_borrow_router.py
+"""
+场地借用路由模块（小程序端）
+提供面向小程序用户的场地借用申请、查询、更新和取消等API接口。
+[v2.0 SQLAlchemy 迁移版 - 新业务流程]
+"""
+from fastapi import APIRouter, HTTPException, Depends, Path, Body
+from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
+
+from app.core.auth import require_permission_level
+from app.services.site_borrow_service import SiteBorrowService
+from app.core.database import get_db
+from app.models.user import User
 
 router = APIRouter()
-# site_borrow_service = SiteBorrowService()
+site_borrow_service = SiteBorrowService()
 
-# 提交场地申请
-@router.post("/post")
-async def create_site_borrow_application(
-    application_data: dict,
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService) 
-):
-    """
-    提交场地借用申请
-    
-    用户不能借用已经借用的场地（场地表中的is_occupied为true）
-    """
-    try:
-        # 验证必要字段
-        required_fields = [
-            "name", "student_id", "phone_num", "email", "purpose", 
-            "mentor_name", "mentor_phone_num", "site_id", "site", 
-            "number", "end_time", "start_time", "project_id"
-        ]
-        
-        for field in required_fields:
-            if field not in application_data:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"缺少必要字段: {field}"
-                )
-        
-        # 获取当前用户ID
-        userid = user.userid  # 假设用户对象中有userid字段
-        
-        # 调用服务层创建申请
-        apply_id = await site_borrow_service.create_borrow_application(application_data, userid)
-        
-        return {
-            "code": 200,
-            "message": "successfully create new site-application",
-            "data": {
-                "apply_id": apply_id
-            }
-        }
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"提交场地申请失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="提交场地申请失败")
+# --- Pydantic 模型定义 ---
 
-# 获取场地借用详情
-@router.get("/detail/{apply_id}")
-async def get_site_borrow_detail(
-    apply_id: str,
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
-):
-    """
-    获取场地借用申请详情
-    
-    在"我的场地"页面中查看特定记录的详细信息
-    """
-    try:
-        logger.info(f"获取场地借用详情 | 申请ID: {apply_id} | 用户: {user.userid}")
-        
-        # 调用服务层获取申请详情
-        application_detail = await site_borrow_service.get_application_detail(apply_id)
-        
-        return {
-            "code": 200,
-            "message": "successfully get site-application detail",
-            "data": application_detail
-        }
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"获取场地借用详情失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取场地借用详情失败")
+class SiteBorrowCreateRequest(BaseModel):
+    """提交场地借用申请的请求体模型。"""
+    name: str
+    student_id: str
+    phone_num: str
+    email: str
+    purpose: str
+    mentor_name: str
+    mentor_phone_num: str
+    site_id: str
+    site: str
+    number: int
+    start_time: str # 前端发送ISO格式字符串, e.g., "2025-10-30T10:00:00"
+    end_time: str
+    project_id: Optional[str] = None
 
-
-# 获取全部场地申请
-@router.get("/view-all")
-async def get_all_site_borrow_applications(
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
-):
-    """
-    获取所有场地借用申请
-    
-    在场地借用审批页面显示所有申请记录
-    """
-    try:
-        logger.info(f"获取全部场地申请 | 请求用户: {user.userid}")
-        
-        # 调用服务层获取申请列表
-        applications = await site_borrow_service.get_all_applications()
-        
-        return {
-            "code": 200,
-            "message": "successfully get application list",
-            "data": applications
-        }
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"获取全部场地申请失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取全部场地申请失败")
-
-# 获取用户所有场地申请
-@router.get("/view")
-async def get_user_site_borrow_applications(
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
-):
-    """
-    获取当前用户的所有场地借用申请
-    
-    在"我的借物"页面显示用户的申请记录
-    """
-    try:
-        logger.info(f"获取用户场地申请 | 用户: {user.userid}")
-        
-        # 获取当前用户ID
-        userid = user.userid
-        
-        # 调用服务层获取用户申请列表
-        applications = await site_borrow_service.get_user_applications(userid)
-        
-        return {
-            "code": 200,
-            "message": "successfully get application list",
-            "data": applications
-        }
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"获取用户场地申请失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取用户场地申请失败")
-
-# 取消场地申请
-@router.post("/cancel/{apply_id}")
-async def cancel_site_borrow_application(
-    apply_id: str,  # 从路径获取申请ID
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
-):
-    """
-    取消场地借用申请
-    
-    用户只能取消自己状态为0（未审核）或1（打回）的申请。
-    """
-    try:
-        logger.info(f"取消场地申请 | 申请ID: {apply_id} | 用户: {user.userid}")
-        
-        # 调用服务层取消申请
-        canceled_apply_id = await site_borrow_service.cancel_application(apply_id, user.userid)
-        
-        return {
-            "code": 200,
-            "message": "successfully cancel site-application",
-            "data": {
-                "apply_id": canceled_apply_id
-            }
-        }
-    except HTTPException as he:
-        # 处理400错误的特殊返回格式
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        # 处理其他HTTP异常
-        raise he
-    except Exception as e:
-        logger.error(f"取消场地申请失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="cancel site-application failed")
-
-# 定义审核请求模型
-class ReviewRequest(BaseModel):
-    state: int
-    review: str = ""
-
-# 发布审核结果
-@router.patch("/review/{apply_id}")
-async def review_site_borrow_application(
-    apply_id: str,
-    review_data: ReviewRequest,
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
-):
-    """
-    发布场地借用审核结果
-    
-    审核员在审核后更新申请状态：
-    - 审核通过：state=2
-    - 审核未通过：state=1，必须提供review
-    
-    只有状态为0（未审核）的申请才能被审核。
-    """
-    try:
-        logger.info(f"发布审核结果 | 申请ID: {apply_id} | 审核员: {user.userid}")
-        
-        # 调用服务层审核申请
-        result = await site_borrow_service.review_application(
-            apply_id, 
-            review_data.state, 
-            review_data.review
-        )
-        
-        return {
-            "code": 200,
-            "message": "successfully update application state",
-            "data": {
-                "apply_id": result[0],
-                "state": result[1],
-                "review": result[2]
-            }
-        }
-    except HTTPException as he:
-        # 处理400错误的特殊返回格式
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        # 处理其他HTTP异常
-        raise he
-    except Exception as e:
-        logger.error(f"发布审核结果失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="review site-application failed")
-
-# 定义更新请求模型
-class UpdateRequest(BaseModel):
+class SiteBorrowUpdateRequest(BaseModel):
+    """更新场地借用申请的请求体模型。所有字段均为可选。"""
     email: Optional[str] = None
     end_time: Optional[str] = None
     mentor_name: Optional[str] = None
@@ -255,121 +48,235 @@ class UpdateRequest(BaseModel):
     project_id: Optional[str] = None
     purpose: Optional[str] = None
     site: Optional[str] = None
+    site_id: Optional[str] = None # 允许更新场地
     start_time: Optional[str] = None
     student_id: Optional[str] = None
 
-# 更新用户场地申请
-@router.patch("/update/{apply_id}")
+class ReviewRequest(BaseModel):
+    """审核请求的模型"""
+    state: int
+    review: str = ""
+
+# --- API 路由 ---
+
+@router.post("/post", summary="提交场地借用申请")
+async def create_site_borrow_application(
+    application_data: SiteBorrowCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)),
+):
+    """
+    用户提交一个新的场地借用申请。
+    后端将验证数据，并创建一个状态为“未审核”的申请记录。
+    """
+    try:
+        logger.info(f"用户 {user.userid} 正在提交场地申请...")
+        
+        # 调用服务层创建申请
+        apply_id = await site_borrow_service.create_borrow_application(db,application_data.dict(), user.userid)
+        
+        logger.success(f"用户 {user.userid} 的场地申请 {apply_id} 已成功创建。")
+        return {
+            "code": 200, "message": "成功创建新的场地借用申请",
+            "data": {"apply_id": apply_id}
+        }
+    except ValueError as e:
+        logger.warning(f"提交场地申请失败 - 业务逻辑错误: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"提交场地申请时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="提交场地申请失败")
+
+@router.get("/detail/{apply_id}", summary="获取场地借用申请详情")
+async def get_site_borrow_detail(
+    apply_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)),
+):
+    """
+    获取单个场地借用申请的详细信息。
+    普通用户只能查看自己的申请，管理员可以查看所有。
+    """
+    try:
+        logger.info(f"用户 {user.userid} 正在请求查看场地申请详情: {apply_id}")
+        
+        application_detail = await site_borrow_service.get_application_detail(db, apply_id)
+        
+        # 权限检查：确保普通用户不能查看不属于自己的申请
+        if user.role == 0 and application_detail.get("userid") != user.userid:
+            logger.warning(f"权限不足: 用户 {user.userid} 尝试查看属于 {application_detail.get('userid')} 的申请 {apply_id}")
+            raise HTTPException(status_code=403, detail="无权查看此申请")
+
+        return {
+            "code": 200, "message": "成功获取场地申请详情",
+            "data": application_detail
+        }
+    except ValueError as e: # Service层抛出的 "申请不存在"
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取场地借用详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取场地借用详情失败")
+
+@router.get("/view-all", summary="获取所有场地申请（管理员）")
+async def get_all_site_borrow_applications(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(1)),
+):
+    """
+    获取所有场地借用申请的简化列表，供管理员概览。
+    """
+    try:
+        logger.info(f"管理员 {user.userid} 正在请求所有场地申请列表。")
+        applications = await site_borrow_service.get_all_applications(db)
+        return {
+            "code": 200, "message": "成功获取所有场地申请列表",
+            "data": applications
+        }
+    except Exception as e:
+        logger.error(f"获取全部场地申请失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取全部场地申请失败")
+
+@router.get("/view", summary="获取当前用户的所有场地申请")
+async def get_user_site_borrow_applications(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)),
+):
+    """
+    获取当前登录用户的所有场地借用申请的简化列表。
+    """
+    try:
+        logger.info(f"用户 {user.userid} 正在请求自己的场地申请列表。")
+        applications = await site_borrow_service.get_user_applications(db, user.userid)
+        return {
+            "code": 200, "message": "成功获取用户的场地申请列表",
+            "data": applications
+        }
+    except Exception as e:
+        logger.error(f"获取用户场地申请失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取用户场地申请失败")
+
+@router.post("/cancel/{apply_id}", summary="用户取消场地申请")
+async def cancel_site_borrow_application(
+    apply_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)),
+):
+    """
+    用户取消自己提交的、处于可取消状态的场地借用申请。
+    """
+    try:
+        logger.info(f"用户 {user.userid} 正在尝试取消场地申请: {apply_id}")
+        
+        canceled_apply_id = await site_borrow_service.cancel_application(db, apply_id, user.userid)
+        
+        logger.success(f"用户 {user.userid} 成功取消了申请 {canceled_apply_id}")
+        return {
+            "code": 200, "message": "成功取消场地申请",
+            "data": {"apply_id": canceled_apply_id}
+        }
+    except ValueError as e:
+        logger.warning(f"取消场地申请失败 - 业务错误: {e}")
+        if "不存在" in str(e): raise HTTPException(status_code=404, detail=str(e))
+        if "无权限" in str(e): raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"取消场地申请时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="取消场地申请失败")
+
+@router.patch("/update/{apply_id}", summary="用户更新场地申请")
 async def update_site_borrow_application(
     apply_id: str,
-    update_data: UpdateRequest,
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
+    update_data: SiteBorrowUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)),
 ):
     """
-    更新场地借用申请
-    
-    用户只能更新自己状态为0（未审核）或1（打回）的申请。
-    支持部分字段更新。
+    用户更新自己提交的、处于“未审核”或“已打回”状态的申请。
     """
     try:
-        logger.info(f"更新场地申请 | 申请ID: {apply_id} | 用户: {user.userid}")
+        logger.info(f"用户 {user.userid} 正在尝试更新场地申请: {apply_id}")
         
-        # 转换为字典并移除空值
-        update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
-        
+        update_dict = update_data.dict(exclude_unset=True)
         if not update_dict:
-            logger.warning("没有提供更新字段")
-            raise HTTPException(
-                status_code=400,
-                detail="no fields provided for update"
-            )
+            raise ValueError("没有提供任何用于更新的字段")
         
-        # 调用服务层更新申请
-        result = await site_borrow_service.update_application(
+        result = await site_borrow_service.update_application(db, apply_id, user.userid, update_dict)
+        
+        return {
+            "code": 200, "message": "成功更新场地申请",
+            "data": {"apply_id": result[0], "changed": result[1]}
+        }
+    except ValueError as e:
+        logger.warning(f"更新场地申请失败 - 业务错误: {e}")
+        if "不存在" in str(e): raise HTTPException(status_code=404, detail=str(e))
+        if "无权限" in str(e) or "不允许" in str(e): raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"更新场地申请时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="更新场地申请失败")
+
+@router.patch("/review/{apply_id}", summary="发布审核结果（管理员在小程序端操作）")
+async def review_site_borrow_application(
+    apply_id: str,
+    review_data: ReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(1)), # 权限要求为管理员
+):
+    """
+    （在小程序端）发布场地借用审核结果 (批准或打回)。
+    此接口功能与后台管理端的审核接口相同。
+    """
+    try:
+        logger.info(f"管理员 {user.userid} 在小程序端审核场地申请 | 申请ID: {apply_id}")
+        
+        # 复用我们已经写好的、健壮的 service 方法
+        result_tuple = await site_borrow_service.review_application(
+            db, 
             apply_id, 
-            user.userid,
-            update_dict
+            review_data.state, 
+            review_data.review
         )
         
-        # 提取实际更新的字段名
-        changed_fields = {k: v["new"] for k, v in result[1].items()}
-        
         return {
             "code": 200,
-            "message": "successfully update new application",
+            "message": "审核成功",
             "data": {
-                "apply_id": result[0],
-                "changed": changed_fields
+                "apply_id": result_tuple[0],
+                "state": result_tuple[1],
+                "review": result_tuple[2]
             }
         }
-    except HTTPException as he:
-        # 处理400错误的特殊返回格式
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        # 处理其他HTTP异常
-        raise he
+    except ValueError as e:
+        # Service 层抛出的业务错误
+        logger.warning(f"审核场地申请 {apply_id} 失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"更新场地申请失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="update site-application failed")
-    except HTTPException as he:
-        # 新增 409 冲突处理
-        if he.status_code == 409:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "code": 409,
-                    "message": he.detail,
-                    "data": {"conflict_type": "site_occupied"}
-                }
-            )
+        logger.error(f"审核场地申请时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="审核场地申请失败")
 
-@router.patch("/return/{apply_id}")
+@router.patch("/return/{apply_id}", summary="用户确认场地归还")
 async def return_borrow_application(
-    apply_id: str,  # 从路径获取申请ID
-    user: dict = Depends(require_permission_level(0)),  # 允许权限0,1,2
-    site_borrow_service: SiteBorrowService = Depends(SiteBorrowService)
+    apply_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_permission_level(0)), # 允许申请人自己归还
 ):
     """
-    归还已借用的场地
-    
-    用户归还已借用的场地，将状态更新为已归还（3）
-    只有状态为2（通过未归还）的申请才能被归还
+    用户（或管理员）确认归还已借用的场地。
     """
     try:
-        logger.info(f"归还场地 | 申请ID: {apply_id} | 用户: {user.userid}")
+        logger.info(f"用户 {user.userid} 正在归还场地，申请ID: {apply_id}")
         
-        # 调用服务层归还场地
-        result = await site_borrow_service.return_borrow_application(apply_id, user.userid)
+        # 调用服务层归还场地，操作员ID为当前用户
+        result = await site_borrow_service.return_borrow_application(db, apply_id, user.userid)
         
         return {
-            "code": 200,
-            "message": "successfully return site",
-            "data": {
-                "apply_id": result[0],
-                "state": result[1]
-            }
+            "code": 200, "message": "成功归还场地",
+            "data": {"apply_id": result[0], "state": result[1]}
         }
-    except HTTPException as he:
-        # 处理400错误的特殊返回格式
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        # 处理其他HTTP异常
-        raise he
+    except ValueError as e:
+        logger.warning(f"归还场地失败 - 业务错误: {e}")
+        if "不存在" in str(e): raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"归还场地失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="return site failed")
+        logger.error(f"归还场地失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="归还场地失败")

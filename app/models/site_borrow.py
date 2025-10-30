@@ -1,73 +1,64 @@
-from .base_model import BaseModel
-from mongoengine import StringField, IntField
+# app/models/site_borrow.py
+"""
+场地借用模型模块 (Site Borrow Model Module)
+
+该模块定义了`SiteBorrow` ORM模型，用于映射数据库中的`site_borrows`表。
+[v2.0 SQLAlchemy 迁移版]
+"""
+from sqlalchemy import String, Integer, Text, ForeignKey, DateTime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 import random
 
-class SiteBorrow(BaseModel):
+from app.core.database import Base
+from .base import BaseMixin
+
+class SiteBorrow(Base, BaseMixin):
     """
-    场地借用模型
+    场地借用数据模型 (ORM Class)
     
-    存储场地借用申请相关信息。
+    映射到`site_borrows`表，存储场地借用申请的详细信息。
+    
+    Attributes:
+        id (int): 自增主键。
+        apply_id (str): 申请的唯一业务ID。
+        userid (str): 申请人的用户ID (微信openid)，外键关联到`users`表。
+        site_id (str): 借用场地的ID，外键关联到`sites`表。
+        number (int): 借用场地的工位号。
+        state (int): 申请状态 (0:未审核, 1:打回, 2:通过未归还, 3:已归还, 4:取消)。
+        start_time (datetime): 借用开始时间。
+        end_time (datetime): 借用结束时间。
     """
-    apply_id = StringField(required=True, unique=True)  # 申请编号
-    userid = StringField(required=True)  # 用户ID
-    name = StringField(required=True)  # 借用人姓名
-    student_id = StringField(required=True)  # 学号
-    phone_num = StringField(required=True)  # 电话号码
-    email = StringField(required=True)  # 邮箱地址
-    purpose = StringField(required=True)  # 借用目的
-    project_id = StringField()  # 项目编号
-    mentor_name = StringField(required=True)  # 指导老师姓名
-    mentor_phone_num = StringField(required=True)  # 指导老师电话
-    site_id = StringField(required=True)  # 场地ID
-    site = StringField(required=True)  # 场地位置
-    number = IntField(required=True)  # 场地编号
-    start_time = StringField(required=True)  # 开始时间
-    end_time = StringField(required=True)  # 结束时间
-    state = IntField(default=0)  # 状态 (0:未审核, 1:打回, 2:通过未归还, 3:已归还, 4:取消)
-    review = StringField(default="")  # 审核反馈
+    __tablename__ = "site_borrows"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, comment="自增主键ID")
+    apply_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True, comment="申请唯一业务ID")
+    userid: Mapped[str] = mapped_column(String(128), ForeignKey("users.userid"), nullable=False, index=True, comment="申请人用户ID")
     
-    # MongoDB集合配置
-    meta = {
-        'collection': 'site_borrows',
-        'indexes': [
-            'apply_id',
-            'userid',
-            'site_id',
-            'number',
-            'start_time',
-            'end_time'
-        ]
-    }
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="借用人姓名")
+    student_id: Mapped[str] = mapped_column(String(50), nullable=False, comment="学号")
+    phone_num: Mapped[str] = mapped_column(String(20), nullable=False, comment="电话号码")
+    email: Mapped[str] = mapped_column(String(100), nullable=False, comment="邮箱地址")
+    purpose: Mapped[str] = mapped_column(Text, nullable=False, comment="借用目的")
+    project_id: Mapped[str | None] = mapped_column(String(50), comment="项目编号")
+    mentor_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="指导老师姓名")
+    mentor_phone_num: Mapped[str] = mapped_column(String(20), nullable=False, comment="指导老师电话")
     
-    @staticmethod
-    def generate_apply_id():
-        """生成申请ID: SB + 当前时间戳(精确到毫秒) + 3位随机数"""
-        now = datetime.utcnow()
-        timestamp = now.strftime("%Y%m%d%H%M%S%f")[:-3]
-        random_suffix = f"{random.randint(0,999):03d}"
-        return f"SB{timestamp}_{random_suffix}"
+    # --- 关联场地信息 ---
+    # 虽然原始模型中有 site_id, site, number 三个字段，
+    # 在关系型设计中，我们只需要一个外键指向 sites 表的主键即可。
+    # 但为了保持API兼容性和简化查询，我们暂时保留这些冗余字段。
+    # 更好的设计是只保留一个 site_fk，然后通过 relationship 访问 Site 对象。
+    site_id: Mapped[str] = mapped_column(String(50), ForeignKey("sites.site_id"), nullable=False, index=True, comment="场地ID")
+    site: Mapped[str] = mapped_column(String(100), nullable=False, comment="场地位置名称")
+    number: Mapped[int] = mapped_column(Integer, nullable=False, comment="场地工位号")
     
-    def to_dict(self):
-        """转换为字典格式"""
-        return {
-            "apply_id": self.apply_id,
-            "userid": self.userid,
-            "name": self.name,
-            "student_id": self.student_id,
-            "phone_num": self.phone_num,
-            "email": self.email,
-            "purpose": self.purpose,
-            "project_id": self.project_id,
-            "mentor_name": self.mentor_name,
-            "mentor_phone_num": self.mentor_phone_num,
-            "site_id": self.site_id,
-            "site": self.site,
-            "number": self.number,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "state": self.state,
-            "review": self.review,
-            "created_at": self.created_at.isoformat() + "Z",
-            "updated_at": self.updated_at.isoformat() + "Z"
-        }
+    # --- 时间字段 ---
+    # 使用 DateTime 类型替代 StringField，更符合数据类型
+    start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="开始时间")
+    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="结束时间")
+    
+    state: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True, comment="状态 (0:未审核, 1:打回, 2:通过, 3:已归还, 4:取消)")
+    review: Mapped[str | None] = mapped_column(Text, default="", comment="审核反馈")
+
+    # 注意：generate_apply_id 将移至 Service 层

@@ -1,41 +1,119 @@
-from app.models.site_borrow import SiteBorrow
-from app.models.site import Site
+# app/services/site_borrow_service.py
+"""
+场地借用服务类：处理场地借用相关的业务逻辑。
+[v2.0 SQLAlchemy 迁移版 - 采用“审批时占用”新业务流程]
+"""
+from sqlalchemy import select, update, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from loguru import logger
 from fastapi import HTTPException
 from datetime import datetime
-from app.core.utils import parse_datetime
-import asyncio
+import random
+
+from app.models.site_borrow import SiteBorrow
+from app.models.site import Site
 
 class SiteBorrowService:
     """场地借用服务类：处理场地借用相关的业务逻辑"""
 
-    def _db_operations(self, application_data: dict, userid: str):
+    @staticmethod
+    def _generate_apply_id() -> str:
         """
-        【同步函数】封装所有数据库读写操作。
-        这个函数不应直接 await，而是通过 asyncio.to_thread 运行。
-        """
-        site_id = application_data.get("site_id")
-        number = application_data.get("number")
-
-        logger.info(f"检查场地状态 | 场地ID: {site_id} | 工位号: {number}")
-
-        # 1. 检查场地是否存在
-        site = Site.objects(site_id=site_id, number=number).first()
-        if not site:
-            logger.warning(f"场地不存在 | 场地ID: {site_id} | 工位号: {number}")
-            return "NOT_FOUND", "场地不存在"
-
-        # 2. 检查场地是否已被占用 - 这是关键逻辑
-        if site.is_occupied:
-            logger.warning(f"场地已被占用 | 场地ID: {site_id} | 工位号: {number}")
-            # 返回一个明确的状态码，让异步函数来处理并抛出正确的HTTPException
-            return "OCCUPIED", "该场地当前已被占用，无法申请。"
+        生成唯一的场地借用申请ID。
+        格式: SB_SITE_ + 当前时间戳(精确到毫秒) + 3位随机数，以区别于物资借用ID。
         
-        # --- 只有在场地未被占用时，才执行以下创建操作 ---
+        Returns:
+            str: 生成的唯一ID字符串。
+        """
+        now = datetime.utcnow()
+        timestamp = now.strftime("%Y%m%d%H%M%S%f")[:-3]
+        random_suffix = f"{random.randint(0,999):03d}"
+        return f"SB_SITE_{timestamp}_{random_suffix}"
+
+    @staticmethod
+    def _borrow_to_dict(application: SiteBorrow) -> dict:
+        """
+        辅助函数：将SiteBorrow ORM对象安全地转换为用于API响应的字典。
+        确保所有字段都被正确序列化，特别是时间字段。
+
+        Args:
+            application: SQLAlchemy的SiteBorrow模型实例。
+
+        Returns:
+            dict: 一个包含场地借用申请完整信息的字典，如果输入为None则返回None。
+        """
+        if not application:
+            return None
+        return {
+            "apply_id": application.apply_id,
+            "userid": application.userid,
+            "name": application.name,
+            "student_id": application.student_id,
+            "phone_num": application.phone_num,
+            "email": application.email,
+            "purpose": application.purpose,
+            "project_id": application.project_id,
+            "mentor_name": application.mentor_name,
+            "mentor_phone_num": application.mentor_phone_num,
+            "site_id": application.site_id,
+            "site": application.site,
+            "number": application.number,
+            "start_time": application.start_time.isoformat() if application.start_time else None,
+            "end_time": application.end_time.isoformat() if application.end_time else None,
+            "state": application.state,
+            "review": application.review,
+            "created_at": application.created_at.isoformat() + "Z" if application.created_at else None,
+            "updated_at": application.updated_at.isoformat() + "Z" if application.updated_at else None,
+        }
+    
+    async def create_borrow_application(self, db: AsyncSession, application_data: dict, userid: str) -> str:
+        """
+        【新流程】创建场地借用申请。
+        此方法仅创建申请记录，状态为“未审核”，不涉及场地占用操作。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            application_data: 包含申请信息的字典。
+            userid: 申请人的用户ID。
+        
+        Returns:
+            str: 成功创建的申请ID。
+        
+        Raises:
+            ValueError: 当业务逻辑验证失败时（如日期错误、场地不存在）。
+            Exception: 当发生其他数据库或未知错误时。
+        """
+        logger.info(f"用户 {userid} 开始创建场地借用申请...")
+        logger.debug(f"收到的申请数据: {application_data}")
         try:
-            apply_id = SiteBorrow.generate_apply_id()
+            # 1. 预处理和验证时间字段
+            start_time_str = application_data.get("start_time")
+            end_time_str = application_data.get("end_time")
+            if not start_time_str or not end_time_str:
+                raise ValueError("必须提供开始和结束时间")
             
-            borrow = SiteBorrow(
+            start_time = datetime.fromisoformat(start_time_str)
+            end_time = datetime.fromisoformat(end_time_str)
+
+            if start_time >= end_time:
+                logger.warning(f"时间逻辑错误: 结束时间 {end_time} 必须晚于开始时间 {start_time}")
+                raise ValueError("结束时间必须晚于开始时间")
+
+            # 2. 检查申请的场地工位是否存在
+            site_id = application_data.get("site_id")
+            number = application_data.get("number")
+            logger.debug(f"检查场地是否存在: site_id={site_id}, number={number}")
+            site_check_stmt = select(Site.id).where(Site.site_id == site_id, Site.number == number)
+            site_exists = (await db.execute(site_check_stmt)).scalar_one_or_none()
+            if not site_exists:
+                logger.warning(f"场地或工位不存在: site_id={site_id}, number={number}")
+                raise ValueError("申请的场地或工位不存在")
+            
+            # 3. 创建申请记录
+            apply_id = self._generate_apply_id()
+            logger.info(f"生成新的申请ID: {apply_id}")
+            new_borrow = SiteBorrow(
                 apply_id=apply_id,
                 userid=userid,
                 name=application_data["name"],
@@ -49,560 +127,404 @@ class SiteBorrowService:
                 site_id=site_id,
                 site=application_data["site"],
                 number=number,
-                start_time=application_data["start_time"],
-                end_time=application_data["end_time"],
-                state=0
+                start_time=start_time,
+                end_time=end_time,
+                state=0 # 初始状态为未审核
             )
-            borrow.save()
             
-            logger.info(f"标记场地为已占用 | 场地ID: {site_id} | 工位号: {number}")
-            site.is_occupied = True
-            site.save()
+            # 4. 提交到数据库
+            db.add(new_borrow)
+            await db.commit()
             
-            logger.info(f"场地借用申请创建成功 | 申请ID: {apply_id}")
-            return "SUCCESS", apply_id
-        except Exception as e:
-            logger.error(f"在数据库操作中创建场地借用申请失败: {str(e)}")
-            return "DB_ERROR", str(e)
-    
-    async def create_borrow_application(self, application_data: dict, userid: str):
-        """
-        【异步函数】创建场地借用申请的主入口。
-        负责调用同步数据库函数并处理返回结果。
-        """
-        logger.info(f"开始创建场地借用申请 | 用户: {userid}")
-        
-        # 1. 前置验证（例如时间格式）
-        for time_field in ["start_time", "end_time"]:
-            time_value = application_data.get(time_field, "")
-            if not parse_datetime(time_value):
-                detail_msg = f"时间格式错误: {time_field} - 应为ISO 8601兼容格式 (如: 2024-02-13)"
-                logger.error(f"时间格式验证失败 | 字段: {time_field} | 值: {time_value}")
-                raise HTTPException(status_code=400, detail=detail_msg)
-        
-        try:
-            # 2. 异步执行所有数据库相关操作
-            status, result = await asyncio.to_thread(
-                self._db_operations, application_data, userid
-            )
-
-            # 3. 根据同步函数返回的状态码，抛出相应的 HTTP 异常
-            if status == "NOT_FOUND":
-                raise HTTPException(status_code=404, detail=result)
-            
-            if status == "OCCUPIED":
-                # 这是最关键的修复：现在我们从这里抛出正确的异常
-                raise HTTPException(status_code=409, detail=result) # 409 Conflict 是更合适的代码
-
-            if status == "DB_ERROR":
-                 raise HTTPException(status_code=500, detail=f"数据库服务异常: {result}")
-
-            # 4. 如果一切顺利，result 就是 apply_id
-            return result
-            
-            logger.info(f"场地借用申请创建成功 | 申请ID: {apply_id} | 场地: {application_data['site']} | 工位号: {number}")
+            logger.success(f"场地借用申请创建成功 | 申请ID: {apply_id}")
             return apply_id
-        
-        except HTTPException as he:
-            # 重新抛出已知的HTTP异常，让FastAPI框架处理
-            raise he    
-        except Exception as e:
-            logger.error(f"创建场地借用申请失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="创建场地借用申请失败")
 
-    async def get_application_detail(self, apply_id: str) -> dict:
+        except ValueError as e:
+            await db.rollback()
+            logger.warning(f"创建场地申请失败 - 业务错误: {e}")
+            raise e
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"创建场地借用申请时发生未知错误: {e}", exc_info=True)
+            raise Exception("创建场地借用申请失败")
+    
+    async def get_application_detail(self, db: AsyncSession, apply_id: str) -> dict:
         """
-        获取场地借用申请详情
+        获取场地借用申请详情。
         
         Args:
-            apply_id: 申请ID
+            db: SQLAlchemy的异步数据库会话。
+            apply_id: 申请ID。
             
         Returns:
-            dict: 包含申请详情的字典
-            
-        Raises:
-            HTTPException: 申请不存在时抛出404错误
-        """
-        try:
-            logger.info(f"查询场地借用详情 | 申请ID: {apply_id}")
-            
-            # 查询申请记录
-            application = SiteBorrow.objects(apply_id=apply_id).first()
-            if not application:
-                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such application",
-                    headers={"X-Error": "Application not found"}
-                )
-            
-            # 构建响应数据
-            return {
-                "apply_id": application.apply_id,
-                "name": application.name,
-                "student_id": application.student_id,
-                "phone_num": application.phone_num,
-                "email": application.email,
-                "purpose": application.purpose,
-                "project_id": application.project_id,
-                "mentor_name": application.mentor_name,
-                "mentor_phone_num": application.mentor_phone_num,
-                "site": application.site,
-                "number": application.number,
-                "start_time": application.start_time,
-                "end_time": application.end_time,
-                "state": application.state,
-                "review": application.review
-            }
-        except Exception as e:
-            logger.error(f"获取申请详情失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="获取申请详情失败")
-    
-    async def get_all_applications(self) -> dict:
-        """
-        获取所有场地借用申请
+            dict: 包含申请详情的字典。
         
-        Returns:
-            dict: 包含申请总数和简化列表的字典
+        Raises:
+            ValueError: 当申请不存在时。
+            Exception: 当发生其他数据库或未知错误时。
         """
         try:
-            logger.info("查询所有场地借用申请")
+            logger.info(f"开始查询场地借用详情 | 申请ID: {apply_id}")
+            stmt = select(SiteBorrow).where(SiteBorrow.apply_id == apply_id)
+            result = await db.execute(stmt)
+            application = result.scalar_one_or_none()
+            if not application:
+                raise ValueError("申请不存在")
             
-            # 查询所有申请记录
-            applications = SiteBorrow.objects().only(
-                "apply_id", "state", "created_at", "site", "number"
-            )
+            logger.success(f"成功获取申请详情: {apply_id}")
+            return self._borrow_to_dict(application)
+        except ValueError as e:
+            logger.warning(f"获取申请详情失败，申请不存在: {apply_id}")
+            raise e
+        except Exception as e:
+            logger.error(f"获取申请详情时发生未知错误: {e}", exc_info=True)
+            raise Exception("获取申请详情失败")
+    
+    async def get_all_applications(self, db: AsyncSession) -> dict:
+        """
+        获取所有场地借用申请（简化列表，供管理员概览）。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            
+        Returns:
+            dict: 包含申请总数和简化版申请信息列表的字典。
+        
+        Raises:
+            Exception: 当发生数据库或未知错误时。
+        """
+        try:
+            logger.info("开始查询所有场地借用申请...")
+            
+            # 查询所有申请记录，并按创建时间降序排列
+            stmt = select(SiteBorrow.apply_id, SiteBorrow.state, SiteBorrow.created_at, SiteBorrow.site, SiteBorrow.number)\
+                .order_by(SiteBorrow.created_at.desc())
+            
+            result = await db.execute(stmt)
+            applications = result.all() # .all() 获取元组列表
             
             # 构建响应数据
-            application_list = []
-            for app in applications:
-                application_list.append({
+            application_list = [
+                {
                     "apply_id": app.apply_id,  
                     "state": app.state,
                     "created_time": app.created_at.isoformat() + "Z",
                     "site": app.site,
                     "number": app.number
-                })
+                }
+                for app in applications
+            ]
             
-            logger.info(f"找到 {len(application_list)} 条场地借用申请")
+            logger.success(f"成功获取 {len(application_list)} 条场地借用申请")
             
             return {
                 "total": len(application_list),
                 "list": application_list
             }
         except Exception as e:
-            logger.error(f"获取全部场地申请失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="获取全部场地申请失败")
+            logger.error(f"获取全部场地申请失败: {e}", exc_info=True)
+            raise Exception("获取全部场地申请失败")
 
-    async def get_user_applications(self, userid: str) -> dict:
+    async def get_user_applications(self, db: AsyncSession, userid: str) -> dict:
         """
-        获取指定用户的所有场地借用申请
+        获取指定用户的所有场地借用申请。
         
         Args:
-            userid: 用户ID
+            db: SQLAlchemy的异步数据库会话。
+            userid: 用户的ID。
             
         Returns:
-            dict: 包含申请总数和简化列表的字典
+            dict: 包含申请总数和简化版申请信息列表的字典。
         """
         try:
-            logger.info(f"查询用户场地借用申请 | 用户ID: {userid}")
+            logger.info(f"开始查询用户 {userid} 的场地借用申请...")
             
-            # 查询该用户的所有申请记录
-            applications = SiteBorrow.objects(userid=userid).only(
-                "apply_id", "state", "created_at", "site", "number"
-            )
+            # 查询该用户的所有申请记录，按创建时间降序排列
+            stmt = select(SiteBorrow.apply_id, SiteBorrow.state, SiteBorrow.created_at, SiteBorrow.site, SiteBorrow.number)\
+                .where(SiteBorrow.userid == userid)\
+                .order_by(SiteBorrow.created_at.desc())
+
+            result = await db.execute(stmt)
+            applications = result.all()
             
             # 构建响应数据
-            application_list = []
-            for app in applications:
-                application_list.append({
+            application_list = [
+                {
                     "apply_id": app.apply_id,
                     "state": app.state,
                     "created_time": app.created_at.isoformat() + "Z",
                     "site": app.site,
                     "number": app.number
-                })
+                }
+                for app in applications
+            ]
             
-            logger.info(f"找到 {len(application_list)} 条用户场地借用申请")
+            logger.success(f"为用户 {userid} 找到 {len(application_list)} 条场地借用申请")
             
             return {
                 "total": len(application_list),
                 "list": application_list
             }
         except Exception as e:
-            logger.error(f"获取用户场地申请列表失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="获取用户场地申请列表失败")
+            logger.error(f"获取用户场地申请列表失败: {e}", exc_info=True)
+            raise Exception("获取用户场地申请列表失败")
 
-    async def cancel_application(self, apply_id: str, userid: str):
+    async def cancel_application(self, db: AsyncSession, apply_id: str, userid: str) -> str:
         """
-        取消场地借用申请
+        【事务】用户取消自己的场地借用申请。
+        此操作是事务性的，因为它可能需要释放场地。
         
         Args:
-            apply_id: 申请ID
-            userid: 当前用户ID（用于验证权限）
+            db: SQLAlchemy的异步数据库会话。
+            apply_id: 申请ID。
+            userid: 当前用户ID（用于验证权限）。
         
         Returns:
-            apply_id: 取消成功的申请ID
+            str: 被取消的申请ID。
         
         Raises:
-            HTTPException: 各种错误情况
+            ValueError: 当业务逻辑验证失败时。
+            Exception: 当发生其他数据库或未知错误时。
         """
-        try:
-            logger.info(f"取消场地申请 | 申请ID: {apply_id} | 用户: {userid}")
-            
-            # 查询申请记录
-            application = SiteBorrow.objects(apply_id=apply_id).first()
-            if not application:
-                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such application",
-                    headers={"X-Error": "Application not found"}
-                )
-            
-            # 检查当前用户是否是申请人
-            if application.userid != userid:
-                logger.warning(f"用户无权限取消该申请 | 当前用户: {userid} | 申请人: {application.userid}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="forbidden to cancel others' application"
-                )
-            
-            # 检查申请状态是否为0（未审核）或1（打回）
-            if application.state not in [0, 1]:
-                logger.warning(f"申请状态不允许取消 | 当前状态: {application.state}")
-                # 按照接口要求返回400，并附带目标状态和实际状态
-                raise HTTPException(
-                    status_code=400,
-                    detail="forbiddened application state",
-                    headers={"X-Error": "Application state not allowed"},
-                    data={
-                        "target": "0 or 1",
-                        "actual": application.state
-                    }
-                )
-            
-            # 执行取消操作：更新申请状态，并释放场地
-            # 注意：这里使用原子操作，先更新申请，再更新场地
-            # 更新申请状态为4（取消）
-            application.state = 4
-            application.save()
-            
-            # 根据申请中的site_id和number找到场地，将其is_occupied置为false
-            site = Site.objects(site_id=application.site_id, number=application.number).first()
-            if site:
-                site.is_occupied = False
-                site.save()
-                logger.info(f"场地已释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
-            else:
-                # 场地不存在，记录错误但继续（因为申请已经取消）
-                logger.error(f"场地不存在，无法释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
-            
-            logger.info(f"申请已取消 | 申请ID: {apply_id}")
-            return apply_id
-            
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            logger.error(f"取消场地申请失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="cancel site-application failed")
+        async with db.begin_nested() as transaction:
+            try:
+                logger.info(f"用户 {userid} 尝试取消场地申请: {apply_id}")
+                
+                # 1. 获取并锁定申请记录
+                stmt = select(SiteBorrow).where(SiteBorrow.apply_id == apply_id).with_for_update()
+                result = await db.execute(stmt)
+                application = result.scalar_one_or_none()
 
-    async def review_application(self, apply_id: str, state: int, review: str = ""):
+                if not application:
+                    logger.warning(f"取消失败：申请不存在 | 申请ID: {apply_id}")
+                    raise ValueError("申请不存在")
+                
+                # 2. 检查权限和状态
+                if application.userid != userid:
+                    logger.warning(f"权限不足：用户 {userid} 尝试取消属于 {application.userid} 的申请")
+                    raise ValueError("无权限取消该申请")
+                
+                # 状态 (0:未审核, 1:打回, 2:通过未归还, 3:已归还, 4:取消)
+                original_state = application.state
+                if original_state not in [0, 1, 2]:
+                    logger.warning(f"申请状态不允许取消 | 当前状态: {original_state}")
+                    raise ValueError("只有未审核、已打回或已通过的申请才能取消")
+                
+                # 3. 更新申请状态为4（已取消）
+                application.state = 4
+                db.add(application)
+                logger.info(f"申请 {apply_id} 状态已在会话中更新为 '已取消'")
+                
+                # 4. 如果申请是“已通过”状态，需要释放场地
+                if original_state == 2:
+                    logger.info(f"申请原状态为'已通过'，准备释放场地: {application.site} - {application.number}")
+                    update_stmt = update(Site).where(
+                        Site.site_id == application.site_id, 
+                        Site.number == application.number
+                    ).values(is_occupied=False)
+                    
+                    # 执行更新，并检查是否真的有行被更新
+                    update_result = await db.execute(update_stmt)
+                    if update_result.rowcount == 0:
+                        # 这是一个警告，说明场地可能已被删除，但不应中断取消流程
+                        logger.warning(f"尝试释放场地时，未找到匹配的场地记录: {application.site_id} - {application.number}")
+                    else:
+                        logger.success(f"场地已成功释放: {application.site} - {application.number}")
+
+                # 5. 事务将在 async with 块结束时自动提交
+                logger.info(f"取消申请 {apply_id} 操作完成，事务即将提交。")
+                return apply_id
+            
+            except ValueError as e:
+                await transaction.rollback()
+                logger.warning(f"取消场地申请失败 - 业务错误: {e}")
+                raise e
+            except Exception as e:
+                await transaction.rollback()
+                logger.error(f"取消场地申请失败: {e}", exc_info=True)
+                raise Exception("取消场地申请失败")
+            
+    async def review_application(self, db: AsyncSession, apply_id: str, state: int, review: str = "") -> tuple:
         """
-        审核场地借用申请
+        【核心事务】审核场地借用申请。
+        - 如果批准，将原子性地检查并占用场地，然后更新申请状态。
+        - 如果打回，仅更新申请状态。
         
         Args:
-            apply_id: 申请ID
-            state: 新状态 (1:打回, 2:通过)
-            review: 审核反馈
+            db: SQLAlchemy的异步数据库会话。
+            apply_id: 申请ID。
+            state: 新状态 (1:打回, 2:通过)。
+            review: 审核反馈。
         
         Returns:
-            tuple: (apply_id, state, review)
-        
-        Raises:
-            HTTPException: 各种错误情况
+            tuple: (apply_id, state, review)。
         """
-        try:
-            logger.info(f"审核场地申请 | 申请ID: {apply_id} | 新状态: {state} | 反馈: {review}")
-            
-            # 查询申请记录
-            application = SiteBorrow.objects(apply_id=apply_id).first()
-            if not application:
-                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such application",
-                    headers={"X-Error": "Application not found"}
-                )
-            
-            # 检查当前状态是否允许审核 (只有未审核状态才能审核)
-            if application.state != 0:
-                logger.warning(f"申请状态不允许审核 | 当前状态: {application.state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="application not in pending state",
-                    data={
-                        "required": 0,
-                        "actual": application.state
-                    }
-                )
-            
-            # 验证新状态值
-            if state not in [1, 2]:
-                logger.warning(f"无效的新状态值: {state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="invalid state value",
-                    data={
-                        "allowed": [1, 2],
-                        "actual": state
-                    }
-                )
-            
-            # 检查审核反馈 (打回时必须提供反馈)
-            if state == 1 and not review:
-                logger.warning(f"打回申请时必须提供审核反馈")
-                raise HTTPException(
-                    status_code=400,
-                    detail="review feedback required for rejected applications"
-                )
-            
-            # 更新申请状态
-            application.state = state
-            application.review = review
-            application.save()
-            
-            logger.info(f"申请已更新 | 申请ID: {apply_id} | 新状态: {state}")
-            return (apply_id, state, review)
-            
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            logger.error(f"审核场地申请失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="review site-application failed")
+        async with db.begin_nested() as transaction:
+            try:
+                logger.info(f"开始审核场地申请 | 申请ID: {apply_id} | 目标状态: {state}")
+                
+                # 1. 获取并锁定申请记录
+                stmt = select(SiteBorrow).where(SiteBorrow.apply_id == apply_id).with_for_update()
+                result = await db.execute(stmt)
+                application = result.scalar_one_or_none()
 
-    async def update_application(self, apply_id: str, userid: str, update_data: dict):
+                if not application: raise ValueError("申请不存在")
+                if application.state not in (0, 1): raise ValueError(f"只有'未审核'和'已打回'的申请才能被审核，当前状态: {application.state}")
+                if state not in [1, 2]: raise ValueError(f"无效的新状态值: {state} (只允许 1 或 2)")
+                if state == 1 and not review: raise ValueError("打回申请时必须提供审核反馈")
+
+                # --- 核心逻辑分支 ---
+                if state == 2: # 批准申请
+                    logger.info(f"批准申请 {apply_id}，准备锁定并占用场地: {application.site} - {application.number}")
+                    
+                    # 2. 锁定目标场地工位
+                    site_stmt = select(Site).where(
+                        Site.site_id == application.site_id, 
+                        Site.number == application.number
+                    ).with_for_update()
+                    site_result = await db.execute(site_stmt)
+                    site = site_result.scalar_one_or_none()
+
+                    if not site:
+                        raise ValueError("申请关联的场地工位已不存在，无法批准")
+                    
+                    # 3. 在锁定的安全环境中检查场地是否已被占用
+                    if site.is_occupied:
+                        logger.warning(f"批准失败：场地 {site.site}-{site.number} 已被占用")
+                        # 自动将申请打回
+                        application.state = 1
+                        application.review = f"【系统自动打回】场地已被占用"
+                        db.add(application)
+                        raise ValueError("场地已被占用，申请已自动打回")
+
+                    # 4. 占用场地
+                    site.is_occupied = True
+                    db.add(site)
+                    logger.success(f"场地 {site.site}-{site.number} 已成功在会话中标记为占用")
+                
+                # 更新申请状态和审核意见 (批准或打回都会执行)
+                application.state = state
+                application.review = review
+                db.add(application)
+                
+                logger.info(f"申请 {apply_id} 状态已更新为 {state}，事务即将提交。")
+                return (apply_id, state, review)
+
+            except ValueError as e:
+                await transaction.rollback()
+                logger.warning(f"审核场地申请失败 - 业务错误: {e}")
+                raise e
+            except Exception as e:
+                await transaction.rollback()
+                logger.error(f"审核场地申请失败: {e}", exc_info=True)
+                raise Exception("审核场地申请失败")
+
+    async def return_borrow_application(self, db: AsyncSession, apply_id: str, userid: str) -> tuple:
         """
-        更新场地借用申请
+        【事务】归还已借用的场地，并释放场地。
         
         Args:
-            apply_id: 申请ID
-            userid: 当前用户ID（用于验证权限）
-            update_data: 包含更新字段的字典
+            db: SQLAlchemy的异步数据库会话。
+            apply_id: 申请ID。
+            userid: 当前用户ID（用于记录操作员）。
         
         Returns:
-            tuple: (apply_id, 实际更新的字段字典)
+            tuple: (apply_id, new_state)。
+        """
+        async with db.begin_nested() as transaction:
+            try:
+                logger.info(f"处理场地归还 | 申请ID: {apply_id} | 操作员: {userid}")
+                
+                stmt = select(SiteBorrow).where(SiteBorrow.apply_id == apply_id).with_for_update()
+                result = await db.execute(stmt)
+                application = result.scalar_one_or_none()
+
+                if not application: raise ValueError("申请不存在")
+                if application.state != 2: raise ValueError("只有'通过未归还'的申请才能被归还")
+                
+                application.state = 3 # 已归还
+                db.add(application)
+                
+                # 释放场地
+                update_stmt = update(Site).where(
+                    Site.site_id == application.site_id, 
+                    Site.number == application.number
+                ).values(is_occupied=False)
+                update_result = await db.execute(update_stmt)
+
+                if update_result.rowcount == 0:
+                    logger.error(f"严重警告：尝试释放一个不存在的场地工位！场地ID: {application.site_id}, 工位号: {application.number}")
+                else:
+                    logger.success(f"场地已释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
+                
+                logger.info(f"场地已成功归还 | 申请ID: {apply_id}")
+                return (apply_id, 3)
+            
+            except ValueError as e:
+                await transaction.rollback()
+                raise e
+            except Exception as e:
+                await transaction.rollback()
+                logger.error(f"归还场地失败: {e}", exc_info=True)
+                raise Exception("归还场地失败")
+
+    async def update_application(self, db: AsyncSession, apply_id: str, userid: str, update_data: dict) -> tuple:
+        """
+        【修正】更新场地借用申请信息（允许更换场地）。
+        在新业务流程下，此操作不涉及场地占用，是安全的。
         
-        Raises:
-            HTTPException: 各种错误情况
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            apply_id: 申请ID。
+            userid: 当前用户ID。
+            update_data: 包含更新字段的字典。
+        
+        Returns:
+            tuple: (apply_id, 实际更新的字段字典)。
         """
         try:
-            logger.info(f"更新场地申请 | 申请ID: {apply_id} | 用户: {userid}")
+            logger.info(f"用户 {userid} 开始更新场地申请 | 申请ID: {apply_id}")
             
-            # 查询申请记录
-            application = SiteBorrow.objects(apply_id=apply_id).first()
-            if not application:
-                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such application",
-                    headers={"X-Error": "Application not found"}
-                )
+            stmt = select(SiteBorrow).where(SiteBorrow.apply_id == apply_id)
+            result = await db.execute(stmt)
+            application = result.scalar_one_or_none()
+
+            if not application: raise ValueError("申请不存在")
+            if application.userid != userid: raise ValueError("无权限更新该申请")
+            if application.state not in [0, 1]: raise ValueError("只有'未审核'或'已打回'的申请才能更新")
             
-            # 检查当前用户是否是申请人
-            if application.userid != userid:
-                logger.warning(f"用户无权限更新该申请 | 当前用户: {userid} | 申请人: {application.userid}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="forbidden to update others' application"
-                )
-            
-            # 检查申请状态是否为0（未审核）或1（打回）
-            if application.state not in [0, 1]:
-                logger.warning(f"申请状态不允许更新 | 当前状态: {application.state}")
-                # 按照接口要求返回400，并附带目标状态和实际状态
-                raise HTTPException(
-                    status_code=400,
-                    detail="forbiddened application state",
-                    data={
-                        "target": "0 or 1",
-                        "actual": application.state
-                    }
-                )
-            
-            # 定义允许更新的字段列表
             allowed_fields = [
-                "email", "end_time", "mentor_name", "mentor_phone_num", "name",
-                "number", "phone_num", "project_id", "purpose", "site",
-                "start_time", "student_id"
+                "email", "end_time", "mentor_name", "mentor_phone_num", "name", 
+                "phone_num", "project_id", "purpose", "start_time", "student_id",
+                "site_id", "site", "number" # 允许更新场地相关字段
             ]
-            
-            # 记录实际更新的字段
             changed_fields = {}
             
-            # 保存更新前的场地信息（用于后续场地占用状态更新）
-            old_site_id = application.site_id
-            old_number = application.number
-
-            # 遍历更新数据，只更新允许的字段
             for field, value in update_data.items():
                 if field in allowed_fields:
-                    # 检查时间字段格式
-                    if field in ["start_time", "end_time"]:
-                        if not parse_datetime(value):
-                            detail_msg = f"时间格式错误: {field} - 应为ISO 8601兼容格式 (如: 2024-02-13)"
-                            logger.error(f"时间格式验证失败 | 字段: {field} | 值: {value}")
-                            raise HTTPException(status_code=400, detail=detail_msg)
+                    if field in ["start_time", "end_time"] and isinstance(value, str):
+                        value = datetime.fromisoformat(value)
                     
-                    # 记录更改
-                    changed_fields[field] = {
-                        "old": getattr(application, field),
-                        "new": value
-                    }
-                    
-                    # 更新字段值
-                    setattr(application, field, value)
+                    if getattr(application, field) != value:
+                        setattr(application, field, value)
+                        changed_fields[field] = value
             
-            # 如果有更新字段，保存申请并更新场地占用状态
             if changed_fields:
-                # 重置审核状态为未审核（如果之前是打回状态）
                 if application.state == 1:
                     application.state = 0
-                    application.review = ""  # 清空之前的审核反馈
-                
-                application.save()
-                logger.info(f"申请已更新 | 申请ID: {apply_id} | 更新字段数: {len(changed_fields)}")
-                
-                # 检查场地是否变更
-                site_changed = ("site_id" in changed_fields or "number" in changed_fields)
-                same_site = (application.site_id == old_site_id and 
-                            application.number == old_number)
-
-                # 如果场地编号有变更，需要更新场地占用状态
-                # if "number" in changed_fields or "site_id" in changed_fields:
-                #     # 释放原场地
-                #     old_site = Site.objects(site_id=application.site_id, number=changed_fields.get("number", {}).get("old", application.number)).first()
-                #     if old_site:
-                #         old_site.is_occupied = False
-                #         old_site.save()
-                #         logger.info(f"原场地已释放 | 场地ID: {application.site_id} | 工位号: {changed_fields.get('number', {}).get('old', application.number)}")
-                    
-                #     # 占用新场地
-                #     new_site = Site.objects(site_id=application.site_id, number=application.number).first()
-                #     if new_site:
-                #         new_site.is_occupied = True
-                #         new_site.save()
-                #         logger.info(f"新场地已占用 | 场地ID: {application.site_id} | 工位号: {application.number}")
-                #     else:
-                #         logger.error(f"新场地不存在 | 场地ID: {application.site_id} | 工位号: {application.number}")
-            
-                # 只有当场地变更时才需要更新占用状态
-                if site_changed and not same_site:
-                    # 释放原场地
-                    old_site = Site.objects(site_id=old_site_id, number=old_number).first()
-                    if old_site:
-                        old_site.is_occupied = False
-                        old_site.save()
-                    
-                    # 检查新场地是否可用（排除自身占用）
-                    new_site = Site.objects(
-                        site_id=application.site_id, 
-                        number=application.number
-                    ).first()
-                    
-                    if new_site:
-                        # 核心修复：检查场地是否被其他申请占用
-                        if new_site.is_occupied:
-                            # 查找当前占用者
-                            occupying_apply = SiteBorrow.objects(
-                                site_id=application.site_id,
-                                number=application.number,
-                                state__in=[0, 1, 2]  # 未审核/打回/通过未归还
-                            ).first()
-                            
-                            # 如果占用者不是自己，才报错
-                            if occupying_apply and occupying_apply.apply_id != apply_id:
-                                raise HTTPException(
-                                    status_code=409,
-                                    detail="该场地已被占用，请选择其他场地"
-                                )
-                        
-                        # 占用新场地
-                        new_site.is_occupied = True
-                        new_site.save()
-                # 场地未变更时不做任何场地状态更新
-            return (apply_id, changed_fields)
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            logger.error(f"更新场地申请失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="update site-application failed")
-
-    async def return_borrow_application(self, apply_id: str, userid: str):
-        """
-        归还已借用的场地
-        
-        Args:
-            apply_id: 申请ID
-            userid: 当前用户ID（用于验证权限）
-        
-        Returns:
-            tuple: (apply_id, new_state)
-        
-        Raises:
-            HTTPException: 各种错误情况
-        """
-        try:
-            logger.info(f"处理场地归还 | 申请ID: {apply_id} | 用户: {userid}")
-            
-            # 查询申请记录
-            application = SiteBorrow.objects(apply_id=apply_id).first()
-            if not application:
-                logger.warning(f"申请不存在 | 申请ID: {apply_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such application",
-                    headers={"X-Error": "Application not found"}
-                )
-            
-            # 检查当前用户是否是申请人
-            # if application.userid != userid:
-            #     logger.warning(f"用户无权限归还该场地 | 当前用户: {userid} | 申请人: {application.userid}")
-            #     raise HTTPException(
-            #         status_code=403,
-            #         detail="forbidden to return others' application"
-            #     )
-            
-            # 检查申请状态是否为2（通过未归还）
-            if application.state != 2:
-                logger.warning(f"申请状态不允许归还 | 当前状态: {application.state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="forbiddened application state",
-                    data={
-                        "target": 2,
-                        "actual": application.state
-                    }
-                )
-            
-            # 更新申请状态为3（已归还）
-            application.state = 3
-            application.save()
-            
-            # 释放场地占用状态
-            site = Site.objects(site_id=application.site_id, number=application.number).first()
-            if site:
-                site.is_occupied = False
-                site.save()
-                logger.info(f"场地已释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
+                    application.review = ""
+                db.add(application)
+                await db.commit()
+                logger.info(f"申请已更新 | 申请ID: {apply_id} | 更新字段: {list(changed_fields.keys())}")
             else:
-                logger.error(f"场地不存在，无法释放 | 场地ID: {application.site_id} | 工位号: {application.number}")
-            
-            logger.info(f"场地已成功归还 | 申请ID: {apply_id}")
-            return (apply_id, 3)
-            
-        except HTTPException as he:
-            raise he
+                logger.info(f"申请 {apply_id} 无任何变更。")
+
+            return (apply_id, changed_fields)
+        
+        except ValueError as e:
+            await db.rollback()
+            raise e
         except Exception as e:
-            logger.error(f"归还场地失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="return site failed")
+            await db.rollback()
+            logger.error(f"更新场地申请失败: {e}", exc_info=True)
+            raise Exception("更新场地申请失败")

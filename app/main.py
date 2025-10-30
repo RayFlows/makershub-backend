@@ -29,6 +29,8 @@ from app.models import (
     user, 
     stuff, 
     stuff_borrow, 
+    site,
+    site_borrow,
     borrow_item
 ) 
 # 导入所有模型以确保SQLAlchemy能识别它们
@@ -39,7 +41,7 @@ from app.routes import (
     # duty_record_router,
     # event_router,
     # publicity_link_router,
-    # site_borrow_router,
+    site_borrow_router,
     site_router,
     stuff_router, 
     stuff_borrow_router,
@@ -279,11 +281,11 @@ app.include_router(
 )
 
 # # 注册场地借用申请路由
-# app.include_router(
-#     site_borrow_router.router,
-#     prefix="/sites-borrow",
-#     tags=["场地借用申请"]
-# )
+app.include_router(
+    site_borrow_router.router,
+    prefix="/sites-borrow",
+    tags=["场地借用申请"]
+)
 
 # # 注册任务相关路由
 # app.include_router(
