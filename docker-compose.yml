@@ -24,8 +24,6 @@ services:
     networks:
       - makerhub-network
 
-  # --- Mongo 服务被移除 ---
-
   # +++ 新增 MySQL 服务 +++
   mysql:
     image: mysql:8.0
