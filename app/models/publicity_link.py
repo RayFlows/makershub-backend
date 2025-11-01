@@ -45,5 +45,5 @@ class PublicityLink(Base, BaseMixin):
     
     link: Mapped[str] = mapped_column(Text, nullable=False, comment="推文链接地址")
     
-    state: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True, comment="审核状态 (0:待审核, 1:审核通过, 2:已打回)")
+    state: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True, comment="审核状态 (0:待审核, 1:已打回, 2:审核通过)")
     review: Mapped[str | None] = mapped_column(Text, comment="审核反馈或打回理由")

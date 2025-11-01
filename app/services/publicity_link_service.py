@@ -151,7 +151,8 @@ class PublicityLinkService:
         # 权限与状态检查
         if link.userid != userid:
             raise PermissionError("Forbidden to update others' link")
-        if link.state not in [0, 2]: # 0=待审核, 2=已打回
+        # 只允许在 0 (待审核) 和 1 (已打回) 状态下更新
+        if link.state not in [0, 1]:
             raise ValueError(f"Link state forbids update. Current state: {link.state}")
 
         # 更新字段
