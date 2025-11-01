@@ -48,9 +48,6 @@ from app.models import (
 
 # --- 路由导入 ---
 from app.routes import (
-    # clean_router,
-    # duty_apply_router,
-    # duty_record_router,
     event_router, 
     publicity_link_router,
     site_borrow_router,
@@ -265,21 +262,15 @@ app.include_router(
     prefix="/users",     # 路由前缀
     tags=["用户管理"]    # API文档分类标签
 )
-# # 添加值班申请路由
-# app.include_router(
-#     duty_apply_router.router,  # 值班申请相关API路由
-#     prefix="/duty-apply",      # 路由前缀
-#     tags=["值班申请"]          # API文档分类标签
-# )
 
-# # 注册Event路由
+# 注册Event路由
 app.include_router(
     event_router.router,  # event相关API路由
     prefix="/events",     # 路由前缀
     tags=["活动管理"]    # API文档分类标签
 )
 
-# # 注册借物申请路由
+# 注册借物申请路由
 app.include_router(
     stuff_borrow_router.router, 
     prefix="/stuff-borrow", 
