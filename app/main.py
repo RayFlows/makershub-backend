@@ -1,4 +1,4 @@
-#main.py
+# app/main.py
 """
 MakerHub API 主应用入口文件
 
@@ -15,31 +15,40 @@ MakerHub API 主应用入口文件
 6. 应用运行配置
 """
 
+import json
+import asyncio
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware  # 用于处理跨域资源共享
-from fastapi.responses import JSONResponse  # 用于返回JSON格式响应
-from fastapi.exceptions import RequestValidationError  # 请求参数验证错误类型
-from loguru import logger  # 高级日志记录工具
-from app.core.database import engine, Base  # 数据库连接管理
-from app.core.config import settings  # 应用配置
-from app.core.logging import setup_logging  # 日志配置
-from app.core.auth import AuthMiddleware  # 自定义认证中间件
-# from app.services.event_service import EventService
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from loguru import logger
+
+# --- 核心模块导入 ---
+from app.core.database import engine, Base
+from app.core.config import settings
+from app.core.logging import setup_logging
+from app.core.auth import AuthMiddleware
+
+# --- 任务模块导入 ---
+from app.tasks import cleanup_incomplete_events_task
+
+# --- 模型导入 (用于 `create_all`) ---
 from app.models import ( 
     user, 
     stuff, 
     stuff_borrow, 
     site,
     site_borrow,
-    borrow_item
+    borrow_item,
+    event  
 ) 
-# 导入所有模型以确保SQLAlchemy能识别它们
-import json
+
+# --- 路由导入 ---
 from app.routes import (
     # clean_router,
     # duty_apply_router,
     # duty_record_router,
-    # event_router,
+    event_router, 
     # publicity_link_router,
     site_borrow_router,
     site_router,
@@ -53,11 +62,10 @@ from app.routes import (
     admin_site_router,
     admin_user_router
 )
-import asyncio
-# 初始化FastAPI应用
 
+# 初始化FastAPI应用
 app = FastAPI(
-    title="MakerHub API",  # API文档标题
+    title=settings.PROJECT_NAME,  # API文档标题
     description="MakerHub后端API",  # API文档描述
     version="1.0.0",  # API版本号
     docs_url="/docs",  # Swagger UI文档地址
@@ -192,6 +200,7 @@ async def startup_event():
     3. 启动后台定时任务。
     """
     setup_logging()
+    logger.info("日志系统初始化完成。")
 
     # --- 新的数据库初始化逻辑 ---
     # 使用异步上下文管理器 `engine.begin()` 来获取一个连接和事务。
@@ -202,10 +211,11 @@ async def startup_event():
         # 注意：这不会处理表的修改或删除。在生产环境中，我们应使用Alembic这样的迁移工具
         # 来管理数据库模式的演变，而不是依赖`create_all`。
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("数据库表结构已同步。")
 
     # 启动后台清理任务
-    # asyncio.create_task(cleanup_incomplete_events_task())
-    # logger.info("应用启动 - 数据库表已初始化，清理任务已启动")
+    asyncio.create_task(cleanup_incomplete_events_task())
+    logger.info("后台清理任务已启动。")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -260,11 +270,11 @@ app.include_router(
 # )
 
 # # 注册Event路由
-# app.include_router(
-#     event_router.router,  # event相关API路由
-#     prefix="/events",     # 路由前缀
-#     tags=["活动管理"]    # API文档分类标签
-# )
+app.include_router(
+    event_router.router,  # event相关API路由
+    prefix="/events",     # 路由前缀
+    tags=["活动管理"]    # API文档分类标签
+)
 
 # # 注册借物申请路由
 app.include_router(
@@ -315,7 +325,7 @@ app.include_router(
 # )
 
 # #健康检查端点：用于监控系统确认API是否正常运行
-@app.get("/health")
+@app.get("/health", tags=["系统"])
 async def health_check():
     """
     健康检查接口
@@ -328,7 +338,7 @@ async def health_check():
     return {"status": "healthy", "version": app.version}
 
 # 根路径端点：API欢迎页
-@app.get("/")
+@app.get("/", tags=["系统"])
 async def root():
     """
     API根路径
@@ -340,9 +350,12 @@ async def root():
     """
     return {"message": "Welcome to MakerHub API!"}
 
+
 # 应用入口点：直接运行此文件时启动应用
 if __name__ == "__main__":
     import uvicorn
+    # 这种运行方式主要用于本地开发，它允许直接通过 `python app/main.py` 启动应用。
+    # 在生产环境中（如Docker），通常会使用Gunicorn + Uvicorn worker来启动。
     uvicorn.run(
         "main:app",                # 应用实例的导入路径
         host=settings.HOST,        # 主机地址，从配置中读取
@@ -350,21 +363,3 @@ if __name__ == "__main__":
         reload=settings.DEBUG,     # 是否启用热重载，生产环境应禁用
         workers=settings.WORKERS   # 工作进程数，影响并发处理能力
     )
-
-# 添加后台任务函数
-# async def cleanup_incomplete_events_task():
-#     """定期清理未完成的事件任务"""
-#     event_service = EventService()
-#     while True:
-#         try:
-#             # 每5分钟执行一次清理
-#             result = await event_service.cleanup_incomplete_events()
-#             if "cleaned" in result:
-#                 logger.info(f"清理未完成事件: {result['cleaned']}个")
-#             elif "error" in result:
-#                 logger.error(f"清理任务出错: {result['error']}")
-#         except Exception as e:
-#             logger.error(f"清理任务异常: {str(e)}")
-        
-#         # 等待5分钟
-#         await asyncio.sleep(300)  # 300秒 = 5分钟

@@ -8,7 +8,7 @@ load_dotenv()  # 加载环境变量
 
 class Settings(pydantic.ConfigDict):
     # 项目设置
-    PROJECT_NAME: str = "MakerHub"
+    PROJECT_NAME: str = "MakersHub"
     # API_V1_STR: str = "/api"
     
     # MongoDB

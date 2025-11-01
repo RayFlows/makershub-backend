@@ -1,95 +1,128 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+# app/routes/event_router.py
+"""
+活动路由模块 (Event Router Module)
+本模块负责处理所有与活动相关的API路由，包括活动的创建、信息更新、海报上传和列表查看。
+[v2.0 SQLAlchemy 迁移版]
+"""
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Body
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Optional
+from datetime import datetime
+from loguru import logger
+import re
+
 from app.services.event_service import EventService
 from app.core.auth import require_permission_level
-from app.models.event import Event
-from app.core.config import settings
-from app.core.utils import parse_datetime
-from loguru import logger
-import asyncio
-from datetime import datetime
-import re
+from app.models.user import User
+from app.core.database import get_db
+from app.core.storage import minio_client
 
 router = APIRouter()
 event_service = EventService()
 
-# 预创建事件 - 返回event_id
-@router.get("/precreate-event")
-async def precreate_event():
+# --- Pydantic Schemas for Request Validation ---
+
+class EventDetailsPayload(BaseModel):
+    event_name: str = Field(..., min_length=1, max_length=100, description="活动名称")
+    description: str = Field(..., description="活动详细描述")
+    participant: Optional[str] = Field("允许全体成员", max_length=100, description="参与对象")
+    location: str = Field(..., max_length=100, description="活动地点")
+    link: Optional[str] = Field(None, description="相关链接（如报名问卷）")
+    # Pydantic 的 `HttpUrl` 类型非常严格，它要求值必须是一个包含协议方案（如 `http://` 或 `https://`）的完整 URL。
+    # link: Optional[HttpUrl] = Field(None, description="相关链接（如报名问卷）")
+    start_time: str = Field(..., description="活动开始时间 (ISO 8601格式, e.g., '2023-10-27T10:00:00+08:00')")
+    end_time: str = Field(..., description="活动结束时间 (ISO 8601格式)")
+    registration_deadline: str = Field(..., description="报名截止时间 (ISO 8601格式)")
+
+# --- API Endpoints ---
+
+@router.get("/precreate-event",
+    summary="预创建活动",
+    description="为前端创建一个临时的活动条目，并返回一个唯一的event_id。前端后续应使用此ID上传活动详情和海报。",
+    dependencies=[Depends(require_permission_level(1))] # 权限：干事及以上
+)
+async def precreate_event(db: AsyncSession = Depends(get_db)):
     """
-    预创建事件，返回生成的event_id
-    前端应使用此event_id上传表单和海报
+    预创建事件，返回生成的event_id。
     """
     try:
-        # 创建只包含event_id的事件记录
-        event_id = Event.generate_event_id()
-        event = Event(event_id=event_id)
-        event.save()
-        
-        logger.info(f"预创建事件成功: {event.event_id}")
+        logger.info("接收到预创建活动请求")
+        new_event = await event_service.precreate_event(db)
+        logger.success(f"活动预创建成功: {new_event.event_id}")
         return {
             "code": 200,
-            "event_id": event.event_id
+            "message": "活动预创建成功",
+            "event_id": new_event.event_id
         }
     except Exception as e:
-        logger.error(f"预创建事件失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="预创建事件失败")
+        logger.error(f"预创建活动失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，预创建活动失败")
 
-# 发布事件详情
-@router.post("/post/{event_id}")
+@router.post("/post/{event_id}",
+    summary="发布或更新活动详情",
+    dependencies=[Depends(require_permission_level(1))] # 权限：干事及以上
+)
 async def post_event(
     event_id: str, 
-    event_data: dict,
-    user: dict = Depends(require_permission_level(1))  # 需要权限1或2
+    event_data: EventDetailsPayload,
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    发布事件详细信息
-    使用预先生成的event_id
+    发布或更新活动的详细文本信息。
     """
     try:
-        # 验证时间格式
-        for time_field in ["start_time", "end_time", "registration_deadline"]:
-            if not parse_datetime(event_data.get(time_field, "")):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"时间格式错误: {time_field}"
-                )
+        logger.info(f"接收到更新活动详情请求: {event_id}")
+        event = await event_service.update_event_details(db, event_id, event_data.dict())
+        if not event:
+            logger.warning(f"更新活动详情失败，未找到活动: {event_id}")
+            raise HTTPException(status_code=404, detail=f"Event with id {event_id} not found")
         
-        # 更新事件详情
-        event = await event_service.update_event_details(event_id, event_data)
+        logger.success(f"活动详情更新成功: {event_id}")
         return {
             "code": 200,
-            "message": "活动创建成功",
+            "message": "活动详情更新成功",
             "data": {"event_id": event.event_id}
         }
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"发布事件失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="发布事件失败")
+        logger.error(f"更新活动详情时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误")
 
-# 上传海报
-@router.post("/poster/{event_id}")
+@router.post("/poster/{event_id}",
+    summary="上传活动海报",
+    dependencies=[Depends(require_permission_level(1))] # 权限：干事及以上
+)
 async def upload_poster(
     event_id: str,
     file: UploadFile = File(...),
-    user: dict = Depends(require_permission_level(1))  # 需要权限1或2
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    上传事件海报
-    使用预先生成的event_id
+    上传活动海报，并将其与指定event_id的活动关联。
     """
-    logger.info(f"▶️ 开始处理海报上传 | 事件ID: {event_id}")
+    logger.info(f"接收到海报上传请求: {event_id}")
     try:
-        # 读取文件内容
         contents = await file.read()
-        logger.info(f"📁 文件已读取 | 大小: {len(contents)}字节")
+        if not contents:
+             raise HTTPException(status_code=400, detail="上传的文件为空")
+        
+        logger.debug(f"文件已读取，大小: {len(contents)}字节，准备调用服务层")
+        poster_object_name = await event_service.update_event_poster(db, event_id, contents)
+        
+        if poster_object_name is None:
+             raise HTTPException(status_code=404, detail=f"Event with id {event_id} not found")
+        
+        # 获取刚上传文件的可访问URL
+        url_result = minio_client.get_file(poster_object_name, bucket_type="POSTERS")
+        poster_url = url_result.get("url", "")
+        if not poster_url:
+            logger.error(f"海报上传成功但获取URL失败: {poster_object_name}")
+            raise HTTPException(status_code=500, detail="海报处理失败")
 
-        # 获取上传后的海报URL
-        poster_url = await event_service.update_event_poster(event_id, contents)
-        logger.debug(f"传回的url：{poster_url}")
-
-        # 更新事件海报
-        await event_service.update_event_poster(event_id, contents)
+        logger.success(f"海报上传并更新记录成功: {event_id}")
         return {
             "code": 200,
             "message": "海报上传成功",
@@ -98,26 +131,23 @@ async def upload_poster(
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"上传海报失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="上传海报失败")
+        logger.error(f"上传海报失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="上传海报时发生服务器内部错误")
 
-# 获取未开展活动列表
-@router.get("/view")
-async def get_upcoming_events(
-    user: dict = Depends(require_permission_level(0))  # 允许权限0,1,2
-):
+@router.get("/view",
+    summary="获取未开展的活动列表",
+    dependencies=[Depends(require_permission_level(0))] # 权限：所有登录用户
+)
+async def get_upcoming_events(db: AsyncSession = Depends(get_db)):
     """
-    获取未开展的所有活动列表
-    
-    未开展指的是活动的开始时间(start_time)晚于当前时间
+    获取所有即将开始的活动列表。
     """
     try:
-        # 获取当前UTC时间
-        current_time = datetime.utcnow().isoformat() + "Z"
-        logger.info(f"获取未开展活动列表 | 当前时间: {current_time}")
+        # 获取当前带时区的时间
+        current_time = datetime.now().astimezone()
+        logger.info(f"获取未开展活动列表 | 当前时间: {current_time.isoformat()}")
         
-        # 调用服务层获取活动列表
-        events = await event_service.get_upcoming_events(current_time)
+        events = await event_service.get_upcoming_events(db, current_time)
         
         return {
             "code": 200,
@@ -128,51 +158,40 @@ async def get_upcoming_events(
             }
         }
     except Exception as e:
-        logger.error(f"获取活动列表失败: {str(e)}")
+        logger.error(f"获取活动列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取活动列表失败")
 
-# 获取特定活动详情
-@router.get("/details/{event_id}")
-async def get_event_details(
-    event_id: str,
-    user: dict = Depends(require_permission_level(0))  # 允许权限0,1,2
-):
+@router.get("/details/{event_id}",
+    summary="获取特定活动详情",
+    dependencies=[Depends(require_permission_level(0))] # 权限：所有登录用户
+)
+async def get_event_details(event_id: str, db: AsyncSession = Depends(get_db)):
     """
-    获取特定活动的详情
-    
-    Args:
-        event_id: 活动ID，格式为EV开头加时间戳
-        
-    Returns:
-        活动详情信息
+    根据event_id获取单个活动的详细信息。
     """
     try:
-        # 验证event_id格式
+        # 简单的格式验证
         if not re.match(r'^EV\d+_\d{3}$', event_id):
-            return {
-                "code": 400,
-                "message": "wrong event_id format",
-                "data": {
-                    "target": "request.params.event_id",
-                    "expected": "EV%Y%M%D%hh%mmxxx",
-                    "actual": event_id
-                }
-            }
+            logger.warning(f"收到格式错误的event_id: {event_id}")
+            raise HTTPException(status_code=400, detail="无效的event_id格式")
         
-        # 调用服务层获取活动详情
-        event = await event_service.get_event_details(event_id)
+        logger.info(f"查询活动详情: {event_id}")
+        event_orm = await event_service.get_event_orm_by_id(db, event_id)
         
-        if not event:
-            return {
-                "code": 404,
-                "message": "record does not exist"
-            }
+        if not event_orm:
+            logger.warning(f"未找到活动: {event_id}")
+            raise HTTPException(status_code=404, detail="活动不存在")
+        
+        # 序列化并获取海报URL
+        event_dict = event_service._event_to_dict(event_orm, with_poster_url=True)
         
         return {
             "code": 200,
             "message": "successfully get event-detail",
-            "data": event
+            "data": event_dict
         }
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        logger.error(f"获取活动详情失败: {str(e)}")
+        logger.error(f"获取活动详情失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取活动详情失败")
