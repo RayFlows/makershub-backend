@@ -1,236 +1,203 @@
-from app.models.publicity_link import PublicityLink
+# app/services/publicity_link_service.py
+"""
+秀米链接服务类：处理秀米链接相关的业务逻辑
+[v2.0 SQLAlchemy 迁移版]
+"""
+from typing import Optional, List, Dict, Any
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
-from fastapi import HTTPException
-from app.core.utils import parse_datetime
+from datetime import datetime
+import random
+
+from app.models.publicity_link import PublicityLink
 
 class PublicityLinkService:
-    """秀米链接服务类：处理秀米链接相关的业务逻辑"""
-    
-    async def create_link(self, userid: str, name: str, title: str, link_url: str):
+    """
+    秀米链接服务类，封装了所有提交、查询和审核秀米链接的业务逻辑。
+    """
+
+    @staticmethod
+    def _generate_link_id() -> str:
         """
-        创建秀米链接
+        生成全局唯一的链接ID。
+        格式: PL + 当前时间戳(YYYYMMDDHHMMSSms) + 3位随机数。
+        
+        Returns:
+            str: 生成的唯一链接ID。
+        """
+        now = datetime.utcnow()
+        timestamp = now.strftime("%Y%m%d%H%M%S%f")[:-3]
+        random_suffix = f"{random.randint(0, 999):03d}"
+        return f"PL{timestamp}_{random_suffix}"
+    
+    def _link_to_dict(self, link: PublicityLink) -> Optional[Dict[str, Any]]:
+        """
+        辅助函数：将SQLAlchemy PublicityLink ORM对象安全地转换为字典。
+        用于API响应序列化，以保持与旧接口的数据结构兼容。
         
         Args:
-            userid: 用户ID
-            name: 发布人姓名
-            title: 推文标题
-            link_url: 链接地址
+            link: SQLAlchemy的PublicityLink模型实例。
+        
+        Returns:
+            一个包含链接信息的字典，如果输入为None则返回None。
+        """
+        if not link:
+            return None
+        
+        # 为了API兼容性，将 created_at 映射回 create_time
+        return {
+            "link_id": link.link_id,
+            "title": link.title,
+            "name": link.name,
+            "userid": link.userid,
+            "link": link.link,
+            "state": link.state,
+            "review": link.review,
+            "create_time": link.created_at.isoformat() + "Z" if link.created_at else None,
+        }
+
+    async def create_link(self, db: AsyncSession, userid: str, name: str, title: str, link_url: str) -> PublicityLink:
+        """
+        创建新的秀米链接提交。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            userid: 提交用户的openid。
+            name: 提交用户的姓名。
+            title: 推文标题。
+            link_url: 推文链接。
             
         Returns:
-            str: 创建的链接ID
+            新创建的PublicityLink ORM实例。
         """
         try:
-            # 验证URL格式
-            if not link_url.startswith(("http://", "https://")):
-                raise HTTPException(
-                    status_code=400,
-                    detail="无效的URL格式，必须以http://或https://开头"
-                )
-            
-            # 创建新链接
-            link = PublicityLink(
-                link_id=PublicityLink.generate_link_id(),
+            new_link = PublicityLink(
+                link_id=self._generate_link_id(),
                 userid=userid,
                 name=name,
                 title=title,
                 link=link_url,
                 state=0  # 初始状态为待审核
             )
-            link.save()
-            
-            logger.info(f"秀米链接创建成功 | 链接ID: {link.link_id} | 用户: {userid}")
-            return link.link_id
-        except HTTPException as he:
-            raise he
+            db.add(new_link)
+            await db.flush()
+            await db.refresh(new_link)
+            logger.info(f"秀米链接创建成功 | Link ID: {new_link.link_id} | User: {userid}")
+            return new_link
         except Exception as e:
-            logger.error(f"创建秀米链接失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="创建秀米链接失败")
-    
-    async def get_all_links(self):
+            logger.error(f"创建秀米链接失败: {e}", exc_info=True)
+            raise
+
+    async def get_all_links(self, db: AsyncSession) -> List[Dict[str, Any]]:
         """
-        获取所有秀米链接
-        
-        Returns:
-            list: 包含所有链接的字典列表
-        """
-        try:
-            links = PublicityLink.objects().order_by("-create_time")
-            return [{
-                "link_id": link.link_id,
-                "title": link.title,
-                "create_time": link.create_time.isoformat() + "Z",
-                "name": link.name,
-                "link": link.link,
-                "state": link.state,
-                "review": link.review
-            } for link in links]
-        except Exception as e:
-            logger.error(f"获取所有秀米链接失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="获取所有秀米链接失败")
-    
-    async def get_user_links(self, userid: str):
-        """
-        获取用户的所有秀米链接
+        获取所有秀米链接，按创建时间降序排列。
         
         Args:
-            userid: 用户ID
+            db: SQLAlchemy的异步数据库会话。
             
         Returns:
-            list: 包含用户链接的字典列表
+            一个包含所有链接信息字典的列表。
         """
         try:
-            links = PublicityLink.objects(userid=userid).order_by("-create_time")
-            return [{
-                "link_id": link.link_id,
-                "title": link.title,
-                "create_time": link.create_time.isoformat() + "Z",
-                "name": link.name,
-                "link": link.link,
-                "state": link.state,
-                "review": link.review
-            } for link in links]
+            stmt = select(PublicityLink).order_by(PublicityLink.created_at.desc())
+            result = await db.execute(stmt)
+            links = result.scalars().all()
+            return [self._link_to_dict(link) for link in links]
         except Exception as e:
-            logger.error(f"获取用户秀米链接失败: {str(e)} | 用户ID: {userid}")
-            raise HTTPException(status_code=500, detail="获取用户秀米链接失败")
-    
-    async def update_link(self, link_id: str, userid: str, update_data: dict):
+            logger.error(f"获取所有秀米链接失败: {e}", exc_info=True)
+            raise
+
+    async def get_user_links(self, db: AsyncSession, userid: str) -> List[Dict[str, Any]]:
         """
-        更新秀米链接
+        获取指定用户提交的所有秀米链接。
         
         Args:
-            link_id: 链接ID
-            userid: 用户ID（用于验证权限）
-            update_data: 更新数据
+            db: SQLAlchemy的异步数据库会话。
+            userid: 用户的openid。
             
         Returns:
-            tuple: (link_id, 实际更新的字段字典)
+            一个包含该用户所有链接信息字典的列表。
         """
         try:
-            # 查询链接记录
-            link = PublicityLink.objects(link_id=link_id).first()
-            if not link:
-                logger.warning(f"链接不存在 | 链接ID: {link_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such link",
-                    headers={"X-Error": "Link not found"}
-                )
-            
-            # 检查当前用户是否是提交人
-            if link.userid != userid:
-                logger.warning(f"用户无权限更新该链接 | 当前用户: {userid} | 提交人: {link.userid}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="forbidden to update others' link"
-                )
-            
-            # 检查链接状态是否为0（待审核）或1（已打回）
-            if link.state not in [0, 1]:
-                logger.warning(f"链接状态不允许更新 | 当前状态: {link.state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="forbiddened link state",
-                    data={
-                        "target": "0 or 1",
-                        "actual": link.state
-                    }
-                )
-            
-            # 定义允许更新的字段
-            allowed_fields = ["title", "name", "link"]
-            
-            # 记录实际更新的字段
-            changed_fields = {}
-            
-            # 遍历更新数据，只更新允许的字段
-            for field, value in update_data.items():
-                if field in allowed_fields:
-                    # 特殊处理链接字段
-                    if field == "link" and not value.startswith(("http://", "https://")):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="无效的URL格式，必须以http://或https://开头"
-                        )
-                    
-                    # 记录更改
-                    changed_fields[field] = {
-                        "old": getattr(link, field),
-                        "new": value
-                    }
-                    
-                    # 更新字段值
-                    setattr(link, field, value)
-            
-            # 如果有更新字段，保存并重置状态为待审核
-            if changed_fields:
-                link.state = 0  # 重置为待审核状态
-                link.review = ""  # 清空审核反馈
-                link.save()
-                logger.info(f"链接已更新 | 链接ID: {link_id} | 更新字段数: {len(changed_fields)}")
-            
-            return (link_id, {k: v["new"] for k, v in changed_fields.items()})
-        except HTTPException as he:
-            raise he
+            stmt = select(PublicityLink).where(PublicityLink.userid == userid).order_by(PublicityLink.created_at.desc())
+            result = await db.execute(stmt)
+            links = result.scalars().all()
+            return [self._link_to_dict(link) for link in links]
         except Exception as e:
-            logger.error(f"更新秀米链接失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="update link failed")
-    
-    async def review_link(self, link_id: str, state: int, review: str = ""):
+            logger.error(f"获取用户秀米链接失败: {e} | UserID: {userid}", exc_info=True)
+            raise
+
+    async def update_link(self, db: AsyncSession, link_id: str, userid: str, update_data: Dict[str, Any]) -> Optional[PublicityLink]:
         """
-        审核秀米链接
+        更新一个秀米链接。
         
         Args:
-            link_id: 链接ID
-            state: 新状态 (1:打回, 2:通过)
-            review: 审核反馈
+            db: SQLAlchemy的异步数据库会话。
+            link_id: 要更新的链接的业务ID。
+            userid: 操作用户的openid，用于权限验证。
+            update_data: 包含要更新字段的字典。
             
         Returns:
-            tuple: (link_id, state, review)
+            更新后的PublicityLink ORM实例，如果链接不存在则返回None。
         """
-        try:
-            # 查询链接记录
-            link = PublicityLink.objects(link_id=link_id).first()
-            if not link:
-                logger.warning(f"链接不存在 | 链接ID: {link_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail="no such link",
-                    headers={"X-Error": "Link not found"}
-                )
+        stmt = select(PublicityLink).where(PublicityLink.link_id == link_id)
+        result = await db.execute(stmt)
+        link = result.scalar_one_or_none()
+
+        if not link:
+            return None
+
+        # 权限与状态检查
+        if link.userid != userid:
+            raise PermissionError("Forbidden to update others' link")
+        if link.state not in [0, 2]: # 0=待审核, 2=已打回
+            raise ValueError(f"Link state forbids update. Current state: {link.state}")
+
+        # 更新字段
+        for field, value in update_data.items():
+            if hasattr(link, field):
+                setattr(link, field, value)
+        
+        # 用户重新编辑后，状态重置为待审核
+        link.state = 0
+        link.review = None # 清空旧的审核反馈
+        
+        db.add(link)
+        await db.flush()
+        await db.refresh(link)
+        logger.info(f"链接已更新 | Link ID: {link_id} | 更新字段: {list(update_data.keys())}")
+        return link
+
+    async def review_link(self, db: AsyncSession, link_id: str, state: int, review: str) -> Optional[PublicityLink]:
+        """
+        审核一个秀米链接。
+        
+        Args:
+            db: SQLAlchemy的异步数据库会话。
+            link_id: 要审核的链接的业务ID。
+            state: 新的审核状态 (1=通过, 2=打回)。
+            review: 审核反馈。
             
-            # 验证新状态值
-            if state not in [1, 2]:
-                logger.warning(f"无效的新状态值: {state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="invalid state value",
-                    data={
-                        "allowed": [1, 2],
-                        "actual": state
-                    }
-                )
-            
-            # 检查当前状态是否为0（待审核）
-            if link.state != 0:
-                logger.warning(f"链接状态不允许审核 | 当前状态: {link.state}")
-                raise HTTPException(
-                    status_code=400,
-                    detail="link not in pending state",
-                    data={
-                        "required": 0,
-                        "actual": link.state
-                    }
-                )
-            
-            # 更新链接状态
-            link.state = state
-            link.review = review
-            link.save()
-            
-            logger.info(f"链接已审核 | 链接ID: {link_id} | 新状态: {state}")
-            return (link_id, state, review)
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            logger.error(f"审核秀米链接失败: {str(e)}")
-            raise HTTPException(status_code=500, detail="review link failed")
+        Returns:
+            审核后的PublicityLink ORM实例，如果链接不存在则返回None。
+        """
+        stmt = select(PublicityLink).where(PublicityLink.link_id == link_id)
+        result = await db.execute(stmt)
+        link = result.scalar_one_or_none()
+
+        if not link:
+            return None
+
+        # 状态检查
+        if link.state != 0: # 必须是待审核状态
+            raise ValueError(f"Link not in pending state. Current state: {link.state}")
+        
+        link.state = state
+        link.review = review
+        
+        db.add(link)
+        await db.flush()
+        await db.refresh(link)
+        logger.info(f"链接已审核 | Link ID: {link_id} | 新状态: {state}")
+        return link

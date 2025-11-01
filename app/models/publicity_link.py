@@ -1,53 +1,49 @@
-from mongoengine import StringField, IntField, DateTimeField
-from .base_model import BaseModel
-from datetime import datetime
-import random
+# app/models/publicity_link.py
+"""
+秀米链接模型模块 (PublicityLink Model Module)
 
-class PublicityLink(BaseModel):
+该模块定义了`PublicityLink` ORM模型，用于映射数据库中的`publicity_links`表。
+它存储了所有与秀米推文链接提交和审核相关的信息。
+"""
+
+from sqlalchemy import String, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+from .base import BaseMixin
+
+class PublicityLink(Base, BaseMixin):
     """
-    秀米链接模型
-    
-    存储秀米链接相关信息。
+    秀米链接数据模型 (ORM Class)
+
+    映射到`publicity_links`表，存储推文链接的标题、提交人、链接地址、审核状态等。
+
+    Attributes:
+        id (int): 自增主键，数据库内部唯一标识。
+        link_id (str): 业务逻辑上的唯一标识符 (格式: PL+时间戳+随机数)，建立了唯一索引。
+        title (str): 推文的标题。
+        name (str): 提交人的真实姓名（为方便后台展示而冗余的字段）。
+        userid (str): 提交用户的微信openid，建立了索引以加速个人链接的查询。
+        link (str): 完整的推文链接地址，使用Text类型以支持长链接。
+        state (int): 审核状态。0=待审核, 1=审核通过, 2=已打回/已拒绝。建立了索引。
+        review (str): 审核员给出的反馈或打回理由，使用Text类型。
     """
-    link_id = StringField(required=True, unique=True)  # 链接编号
-    title = StringField(required=True)  # 推文标题
-    name = StringField(required=True)  # 发布人姓名
-    userid = StringField(required=True)  # 用户ID
-    link = StringField(required=True)  # 链接地址
-    state = IntField(default=0)  # 审核状态 (0:待审核, 1:审核通过, 2:已打回)
-    review = StringField(default="")  # 审核反馈信息
-    create_time = DateTimeField(default=datetime.utcnow)  # 创建时间
+    __tablename__ = "publicity_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, comment="自增主键ID")
+    link_id: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False, comment="业务唯一ID (PL+时间戳)")
     
-    # MongoDB集合配置
-    meta = {
-        'collection': 'publicity_links',
-        'indexes': [
-            'link_id',
-            'userid',
-            'state',
-            'create_time'
-        ]
-    }
+    title: Mapped[str] = mapped_column(String(255), nullable=False, comment="推文标题")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="提交人姓名")
     
-    @staticmethod
-    def generate_link_id():
-        """生成链接ID: PL + 当前时间戳(精确到毫秒) + 3位随机数"""
-        now = datetime.utcnow()
-        timestamp = now.strftime("%Y%m%d%H%M%S%f")[:-3]
-        random_suffix = f"{random.randint(0,999):03d}"
-        return f"PL{timestamp}_{random_suffix}"
+    # TODO (v0.2): 技术债务 - 外键规范化
+    # 当前的 userid 存储的是 users.userid (openid)，这是为了在迁移阶段(v0.1)保持API兼容性。
+    # 在未来的优化阶段(v0.2)，这里应该被一个名为 user_id 的整型外键取代，
+    # 该外键将直接关联到 users 表的自增主键 id。
+    # FOREIGN KEY (user_id) REFERENCES users(id)
+    userid: Mapped[str] = mapped_column(String(128), index=True, nullable=False, comment="提交用户的openid")
     
-    def to_dict(self):
-        """转换为字典格式"""
-        return {
-            "link_id": self.link_id,
-            "title": self.title,
-            "name": self.name,
-            "userid": self.userid,
-            "link": self.link,
-            "state": self.state,
-            "review": self.review,
-            "create_time": self.create_time.isoformat() + "Z",
-            "created_at": self.created_at.isoformat() + "Z",
-            "updated_at": self.updated_at.isoformat() + "Z"
-        }
+    link: Mapped[str] = mapped_column(Text, nullable=False, comment="推文链接地址")
+    
+    state: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True, comment="审核状态 (0:待审核, 1:审核通过, 2:已打回)")
+    review: Mapped[str | None] = mapped_column(Text, comment="审核反馈或打回理由")

@@ -40,7 +40,8 @@ from app.models import (
     site,
     site_borrow,
     borrow_item,
-    event  
+    event,
+    publicity_link  
 ) 
 
 # --- 路由导入 ---
@@ -49,7 +50,7 @@ from app.routes import (
     # duty_apply_router,
     # duty_record_router,
     event_router, 
-    # publicity_link_router,
+    publicity_link_router,
     site_borrow_router,
     site_router,
     stuff_router, 
@@ -305,11 +306,11 @@ app.include_router(
 # )
 
 
-# app.include_router(
-#     publicity_link_router.router,  
-#     prefix="/publicity-link",  
-#     tags=["秀米链接"]  
-# )
+app.include_router(
+    publicity_link_router.router,  
+    prefix="/publicity-link",  
+    tags=["秀米链接"]  
+)
 
 
 app.include_router(

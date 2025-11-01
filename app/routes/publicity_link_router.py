@@ -1,74 +1,79 @@
+# app/routes/publicity_link_router.py
+"""
+秀米链接路由模块 (PublicityLink Router Module)
+本模块负责处理所有与秀米链接提交和审核相关的API路由。
+[v2.0 SQLAlchemy 迁移版]
+"""
+
 from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Optional, List, Dict, Any
+from loguru import logger
+
 from app.services.publicity_link_service import PublicityLinkService
 from app.core.auth import require_permission_level
-from loguru import logger
-from pydantic import BaseModel
-from typing import Optional, List
+from app.models.user import User
+from app.core.database import get_db
 
 router = APIRouter()
+# 我们不再需要全局实例化 service
+# service = PublicityLinkService()
 
-# 请求模型：提交秀米链接
+# --- Pydantic Schemas for Request Validation ---
+
 class SubmitLinkRequest(BaseModel):
-    title: str
-    name: str
-    link: str
+    title: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=50)
+    # link: HttpUrl # 使用 Pydantic 的 URL 类型进行自动验证
+    link: str # 改回 str 类型以兼容不带协议的链接
 
-# 请求模型：更新秀米链接
 class UpdateLinkRequest(BaseModel):
-    title: Optional[str] = None
-    name: Optional[str] = None
-    link: Optional[str] = None
+    title: Optional[str] = Field(None, min_length=1, max_length=100)
+    name: Optional[str] = Field(None, min_length=1, max_length=50)
+    # link: Optional[HttpUrl] = None # 使用 Pydantic 的 URL 类型进行自动验证
+    link: str # 改回 str 类型以兼容不带协议的链接
 
-# 请求模型：审核秀米链接
 class ReviewRequest(BaseModel):
-    state: int
+    state: int = Field(..., ge=1, le=2) # 状态必须是 1 (通过) 或 2 (打回)
     review: str = ""
 
-# 提交秀米链接
-@router.post("/post")
+# --- API Endpoints ---
+
+@router.post("/post", summary="提交秀米链接", dependencies=[Depends(require_permission_level(1))])
 async def submit_publicity_link(
     request: SubmitLinkRequest,
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    service: PublicityLinkService = Depends(PublicityLinkService)
+    current_user: User = Depends(require_permission_level(1)),
+    db: AsyncSession = Depends(get_db)
 ):
-    """提交秀米链接"""
+    """提交一个新的秀米链接以供审核。"""
     try:
-        logger.info(f"提交秀米链接 | 用户: {user.userid}")
+        service = PublicityLinkService()
+        logger.info(f"用户 {current_user.userid} 正在提交秀米链接: {request.title}")
         
-        # 调用服务层创建链接
-        link_id = await service.create_link(
-            userid=user.userid,
+        new_link = await service.create_link(
+            db=db,
+            userid=current_user.userid,
             name=request.name,
             title=request.title,
-            link_url=request.link
+            link_url=str(request.link)
         )
         
         return {
             "code": 200,
             "message": "successfully post xiumi link",
-            "data": {
-                "link_id": link_id
-            }
+            "data": {"link_id": new_link.link_id}
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"提交秀米链接失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="提交秀米链接失败")
+        logger.error(f"提交秀米链接失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，提交失败")
 
-# 获取所有秀米链接
-@router.get("/view-all")
-async def get_all_links(
-    user: dict = Depends(require_permission_level(2)),  # 需要权限2
-    service: PublicityLinkService = Depends(PublicityLinkService)
-):
-    """获取所有秀米链接（审核页面使用）"""
+@router.get("/view-all", summary="获取所有秀米链接 (管理员)", dependencies=[Depends(require_permission_level(2))])
+async def get_all_links(db: AsyncSession = Depends(get_db)):
+    """获取所有已提交的秀米链接，用于审核。"""
     try:
-        logger.info(f"获取所有秀米链接 | 请求用户: {user.userid}")
-        
-        # 调用服务层获取所有链接
-        links = await service.get_all_links()
-        
+        service = PublicityLinkService()
+        links = await service.get_all_links(db)
         return {
             "code": 200,
             "message": "successfully get all xiumi link",
@@ -77,25 +82,19 @@ async def get_all_links(
                 "list": links
             }
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"获取所有秀米链接失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取所有秀米链接失败")
+        logger.error(f"获取所有秀米链接失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，获取失败")
 
-# 获取用户秀米链接
-@router.get("/view-my")
+@router.get("/view-my", summary="获取我的秀米链接", dependencies=[Depends(require_permission_level(1))])
 async def get_user_links(
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    service: PublicityLinkService = Depends(PublicityLinkService)
+    current_user: User = Depends(require_permission_level(1)),
+    db: AsyncSession = Depends(get_db)
 ):
-    """获取当前用户的秀米链接"""
+    """获取当前用户提交的所有秀米链接。"""
     try:
-        logger.info(f"获取用户秀米链接 | 用户: {user.userid}")
-        
-        # 调用服务层获取用户链接
-        links = await service.get_user_links(user.userid)
-        
+        service = PublicityLinkService()
+        links = await service.get_user_links(db, current_user.userid)
         return {
             "code": 200,
             "message": "successfully get my xiumi link",
@@ -104,95 +103,74 @@ async def get_user_links(
                 "list": links
             }
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"获取用户秀米链接失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取用户秀米链接失败")
+        logger.error(f"获取我的秀米链接失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，获取失败")
 
-# 更新秀米链接
-@router.patch("/update/{link_id}")
+@router.patch("/update/{link_id}", summary="更新我的秀米链接", dependencies=[Depends(require_permission_level(1))])
 async def update_link(
     link_id: str,
     request: UpdateLinkRequest,
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    service: PublicityLinkService = Depends(PublicityLinkService)
+    current_user: User = Depends(require_permission_level(1)),
+    db: AsyncSession = Depends(get_db)
 ):
-    """更新秀米链接"""
+    """更新一个已提交但未审核通过的秀米链接。"""
     try:
-        logger.info(f"更新秀米链接 | 链接ID: {link_id} | 用户: {user.userid}")
-        
-        # 转换为字典并移除空值
-        update_data = {k: v for k, v in request.dict().items() if v is not None}
-        
+        service = PublicityLinkService()
+        # exclude_unset=True 确保我们只传递用户真正想要更新的字段
+        update_data = request.dict(exclude_unset=True)
         if not update_data:
-            logger.warning("没有提供更新字段")
-            raise HTTPException(
-                status_code=400,
-                detail="no fields provided for update"
-            )
+            raise HTTPException(status_code=400, detail="No fields provided for update")
+
+        # 将 Pydantic 的 HttpUrl 对象转换为字符串
+        if 'link' in update_data:
+            update_data['link'] = str(update_data['link'])
+
+        updated_link = await service.update_link(db, link_id, current_user.userid, update_data)
         
-        # 调用服务层更新链接
-        result = await service.update_link(link_id, user.userid, update_data)
-        
+        if updated_link is None:
+            raise HTTPException(status_code=404, detail="Link not found")
+
         return {
             "code": 200,
             "message": "successfully update xiumi-link",
             "data": {
-                "link_id": result[0],
-                "changed": result[1]
+                "link_id": updated_link.link_id,
+                "changed": update_data
             }
         }
-    except HTTPException as he:
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        raise he
+    except PermissionError as e:
+        logger.warning(f"权限错误: {e} | User: {current_user.userid}, LinkID: {link_id}")
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        logger.warning(f"值错误: {e} | User: {current_user.userid}, LinkID: {link_id}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"更新秀米链接失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="update link failed")
+        logger.error(f"更新秀米链接失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，更新失败")
 
-# 审核秀米链接
-@router.patch("/review/{link_id}")
+@router.patch("/review/{link_id}", summary="审核秀米链接 (管理员)", dependencies=[Depends(require_permission_level(2))])
 async def review_link(
     link_id: str,
     request: ReviewRequest,
-    user: dict = Depends(require_permission_level(2)),  # 需要权限2
-    service: PublicityLinkService = Depends(PublicityLinkService)
+    db: AsyncSession = Depends(get_db)
 ):
-    """审核秀米链接"""
+    """审核一个待处理的秀米链接。"""
     try:
-        logger.info(f"审核秀米链接 | 链接ID: {link_id} | 审核员: {user.userid}")
-        
-        # 调用服务层审核链接
-        result = await service.review_link(link_id, request.state, request.review)
-        
+        service = PublicityLinkService()
+        reviewed_link = await service.review_link(db, link_id, request.state, request.review)
+
+        if reviewed_link is None:
+            raise HTTPException(status_code=404, detail="Link not found")
+
         return {
             "code": 200,
             "message": "successfully reviewed xiumi-link",
-            "data": {
-                "link_id": result[0],
-                "state": result[1],
-                "review": result[2]
-            }
+            "data": service._link_to_dict(reviewed_link)
         }
-    except HTTPException as he:
-        if he.status_code == 400 and hasattr(he, 'data'):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "code": 400,
-                    "message": he.detail,
-                    "data": he.data
-                }
-            )
-        raise he
+    except ValueError as e:
+        logger.warning(f"审核操作值错误: {e} | LinkID: {link_id}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"审核秀米链接失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="review link failed")
+        logger.error(f"审核秀米链接失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，审核失败")
