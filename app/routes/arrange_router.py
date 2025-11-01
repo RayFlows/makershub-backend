@@ -65,7 +65,8 @@ async def get_current_arrangers(db: AsyncSession = Depends(get_db)):
 async def batch_create_arrangements(
     # 使用 Pydantic 模型进行验证，而不是原始字典
     request_data: BatchArrangeRequest,
-    # TODO: 生产环境中应启用权限检查
+    # TODO (Security): 此接口应由后台管理前端调用，生产环境中必须恢复管理员权限检查。
+    # 当前为方便测试暂时取消权限依赖。
     # user: User = Depends(require_permission_level(2)),
     db: AsyncSession = Depends(get_db)
 ):
