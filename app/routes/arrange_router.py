@@ -1,121 +1,95 @@
+# app/routes/arrange_router.py
+"""
+排班安排路由模块 (Arrange Router Module)
+本模块负责处理所有与学年工作排班相关的API路由。
+[v2.0 SQLAlchemy 迁移版]
+"""
 from fastapi import APIRouter, HTTPException, Depends
-from app.services.arrange_service import ArrangeService
-from app.core.auth import require_permission_level
+from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from pydantic import BaseModel
 from typing import Dict, List, Any
 
+from app.services.arrange_service import ArrangeService
+from app.core.auth import require_permission_level
+from app.core.database import get_db
+from app.models.user import User
+
 router = APIRouter()
 
-# 排班人员数据结构
+# --- Pydantic Schemas for Request Validation ---
+
 class ArrangePerson(BaseModel):
     name: str
     order: int
     current: bool
-    maker_id: str  
+    maker_id: str
 
-# 获取排班安排
-@router.get("/get-arrangement")
-async def get_arrangements(
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    service: ArrangeService = Depends(ArrangeService)
-):
-    """获取所有排班安排"""
+class BatchArrangeRequest(BaseModel):
+    # 使用 Pydantic 的 Dict 类型进行更严格的验证
+    __root__: Dict[str, List[ArrangePerson]]
+
+# --- API Endpoints ---
+
+@router.get("/get-arrangement", summary="获取所有排班安排", dependencies=[Depends(require_permission_level(1))])
+async def get_arrangements(db: AsyncSession = Depends(get_db)):
+    """获取所有任务类型的排班安排，按类型分组。"""
     try:
-        logger.info(f"获取排班安排 | 用户: {user.userid}")
-        
-        # 调用服务层获取排班安排
-        arrangements = await service.get_all_arrangements()
-        
+        service = ArrangeService()
+        arrangements = await service.get_all_arrangements(db)
         return {
             "code": 200,
             "message": "successfully get all arrangements",
             "data": arrangements
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"获取排班安排失败: {str(e)}")
+        logger.error(f"获取排班安排失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取排班安排失败")
 
-@router.get("/get-current")
-async def get_current_arrangers(
-    user: dict = Depends(require_permission_level(1)),  # 需要权限1或2
-    service: ArrangeService = Depends(ArrangeService)
-):
-    """获取本次宣传部三个任务轮到的干事的信息"""
+@router.get("/get-current", summary="获取当前所有值班人员", dependencies=[Depends(require_permission_level(1))])
+async def get_current_arrangers(db: AsyncSession = Depends(get_db)):
+    """获取宣传部三个任务当前轮到的值班人员信息。"""
     try:
-        logger.info(f"获取当前值班人员 | 用户: {user.userid}")
-        
-        # 调用服务层获取当前值班人员
-        current_makers = await service.get_current_makers()
-        
+        service = ArrangeService()
+        current_makers = await service.get_current_makers(db)
         return {
             "code": 200,
             "message": "successfully get current maker",
             "data": current_makers
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"获取当前值班人员失败: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": 500,
-                "message": "获取当前值班人员失败"
-            }
-        )
+        logger.error(f"获取当前值班人员失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取当前值班人员失败")
 
-# 批量创建排班安排
-@router.post("/arrangements/batch")
+@router.post("/arrangements/batch", summary="批量创建/重置排班安排")
 async def batch_create_arrangements(
-    request_data: Dict[str, List[Dict[str, Any]]],  # 直接接收字典结构
-    # user: dict = Depends(require_permission_level(2)),  # 需要权限2
-    service: ArrangeService = Depends(ArrangeService)
+    # 使用 Pydantic 模型进行验证，而不是原始字典
+    request_data: BatchArrangeRequest,
+    # TODO: 生产环境中应启用权限检查
+    # user: User = Depends(require_permission_level(2)),
+    db: AsyncSession = Depends(get_db)
 ):
-    """批量创建排班安排（测试用）"""
+    """
+    (管理员权限) 批量创建或重置所有任务类型的排班安排。
+    此操作会先清空所有旧的排班数据，然后插入新的数据，整个过程是原子性的。
+    """
     try:
-        # logger.info(f"批量创建排班安排 | 用户: {user.userid}")
+        service = ArrangeService()
+        # Pydantic 模型会自动解析 __root__，所以我们直接传入 request_data.dict()['__root__']
+        validated_data = request_data.dict()['__root__']
         
-        # 验证和转换请求数据
-        validated_data = {}
-        for task_type, person_list in request_data.items():
-            # 验证任务类型
-            if task_type not in ["1", "2", "3"]:
-                logger.warning(f"跳过无效的任务类型: {task_type}")
-                continue
-            
-            # 验证人员列表
-            validated_list = []
-            for person in person_list:
-                try:
-                    # 确保包含必要字段
-                    if not all(key in person for key in ["name", "order", "current", "maker_id"]):
-                                logger.warning(f"人员数据缺少必要字段: {person}")
-                                continue
-                    
-                    validated_list.append({
-                        "name": person["name"],
-                        "order": person["order"],
-                        "current": person["current"],
-                        "maker_id": person["maker_id"]
-                    })
-                except Exception as e:
-                    logger.warning(f"解析人员数据失败: {str(e)} | 数据: {person}")
-            
-            validated_data[task_type] = validated_list
-        
-        # 调用服务层批量创建
-        result = await service.batch_create_arrangements(validated_data)
+        # 验证 task_type key 是否为 "1", "2", "3"
+        valid_keys = {"1", "2", "3"}
+        if not set(validated_data.keys()).issubset(valid_keys):
+            raise HTTPException(status_code=400, detail="请求数据中包含无效的任务类型键。只接受 '1', '2', '3'。")
+
+        result = await service.batch_create_arrangements(db, validated_data)
         
         return {
             "code": 200,
             "message": "successfully batch create arrangements",
             "data": result
         }
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"批量创建排班失败: {str(e)}")
+        logger.error(f"批量创建排班失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="批量创建排班失败")

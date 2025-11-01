@@ -1,65 +1,49 @@
-from mongoengine import StringField, IntField, DateTimeField
-from .base_model import BaseModel
+# app/models/task.py
+"""
+任务模型模块 (Task Model Module)
+
+该模块定义了`Task` ORM模型，用于映射数据库中的`tasks`表。
+它存储了所有与任务分配、状态跟踪相关的信息。
+"""
+
+from sqlalchemy import String, Integer, Text, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-import random
 
-class Task(BaseModel):
+from app.core.database import Base
+from .base import BaseMixin
+
+class Task(Base, BaseMixin):
     """
-    任务数据模型
-    
+    任务数据模型 (ORM Class)
+
+    映射到`tasks`表，存储任务的类型、内容、负责人、状态和截止日期。
+
     Attributes:
-        task_id: 任务唯一标识符
-        department: 负责部门
-        task_type: 任务类型 (0:其他, 1:活动文案, 2:推文, 3:新闻稿)
-        maker_id: 负责人协会ID
-        name: 负责人姓名
-        content: 任务内容
-        state: 任务状态 (0-未完成, 1-已完成, 2-已取消)
-        deadline: 截止时间
+        id (int): 自增主键，数据库内部唯一标识。
+        task_id (str): 业务逻辑上的唯一标识符 (格式: TS+时间戳+随机数)。
+        department (int): 任务所属部门的ID。
+        task_type (int): 任务类型 (0:其他, 1:活动文案, 2:推文, 3:新闻稿)。
+        maker_id (str): 负责人的协会ID (maker_id)。
+        name (str): 负责人的真实姓名 (为方便展示而冗余)。
+        content (str): 任务的具体内容。
+        state (int): 任务状态 (0:未完成, 1:已完成, 2:已取消)。
+        deadline (datetime): 任务的截止日期和时间。
     """
-    
-    task_id = StringField(required=True, unique=True)
-    department = IntField(required=True)
-    task_type = IntField(required=True)
-    maker_id = StringField(required=True)
-    name = StringField(required=True)
-    content = StringField(required=True)
-    state = IntField(default=0)  # 0-未完成, 1-已完成, 2-已取消
-    deadline = DateTimeField(required=True)
+    __tablename__ = "tasks"
 
-    # MongoDB集合配置和索引定义
-    meta = {
-        'collection': 'tasks',
-        'indexes': [
-            'task_id',
-            'department',
-            'task_type',
-            'maker_id',
-            'state',
-            'deadline'
-        ]
-    }
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, comment="自增主键ID")
+    task_id: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False, comment="业务唯一ID (TS+时间戳)")
     
-    def to_dict(self):
-        """
-        将任务对象转换为字典格式
-        """
-        return {
-            "task_id": self.task_id,
-            "department": self.department,
-            "task_type": self.task_type,
-            "maker_id": self.maker_id,
-            "name": self.name,
-            "content": self.content,
-            "state": self.state,
-            "deadline": self.deadline.isoformat() + "Z",
-            "created_at": self.created_at.isoformat() + "Z",
-            "updated_at": self.updated_at.isoformat() + "Z"
-        }
+    department: Mapped[int] = mapped_column(Integer, index=True, nullable=False, comment="所属部门ID")
+    task_type: Mapped[int] = mapped_column(Integer, index=True, nullable=False, comment="任务类型 (0:其他, 1:文案, 2:推文, 3:新闻稿)")
     
-    @classmethod
-    def generate_task_id(cls):
-        """生成唯一任务ID"""
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]  # 精确到毫秒
-        random_suffix = str(random.randint(100, 999))  # 3位随机数
-        return f"TS{timestamp}_{random_suffix}"
+    # TODO (v0.2): 技术债务 - 外键规范化
+    # 当前的 maker_id 存储的是 users.maker_id，name 是冗余字段。
+    # 未来应使用 user_id 外键关联到 users.id，并通过 JOIN 获取姓名。
+    maker_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False, comment="负责人的协会ID")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="负责人姓名 (冗余)")
+
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="任务具体内容")
+    state: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True, comment="任务状态 (0:未完成, 1:已完成, 2:已取消)")
+    deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True, comment="任务截止时间")

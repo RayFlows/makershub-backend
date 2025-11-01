@@ -41,7 +41,9 @@ from app.models import (
     site_borrow,
     borrow_item,
     event,
-    publicity_link  
+    publicity_link,
+    task,
+    arrange  
 ) 
 
 # --- 路由导入 ---
@@ -55,8 +57,8 @@ from app.routes import (
     site_router,
     stuff_router, 
     stuff_borrow_router,
-    # task_router,
-    # arrange_router,
+    task_router,
+    arrange_router,
     user_router,
     admin_router,
     admin_stuff_router,
@@ -299,11 +301,11 @@ app.include_router(
 )
 
 # # 注册任务相关路由
-# app.include_router(
-#     task_router.router,  # 任务相关API路由
-#     prefix="/tasks",     # 路由前缀
-#     tags=["任务管理"]    # API文档分类标签
-# )
+app.include_router(
+    task_router.router,  # 任务相关API路由
+    prefix="/tasks",     # 路由前缀
+    tags=["任务管理"]    # API文档分类标签
+)
 
 
 app.include_router(
@@ -319,11 +321,11 @@ app.include_router(
     tags=["物资管理"]       # API文档分类标签
 )
 
-# app.include_router(
-#     arrange_router.router,  # 排班相关API路由
-#     prefix="/arrange",  # 路由前缀
-#     tags=["学年工作安排"]        # API文档分类标签
-# )
+app.include_router(
+    arrange_router.router,  # 排班相关API路由
+    prefix="/arrange",  # 路由前缀
+    tags=["学年工作安排"]        # API文档分类标签
+)
 
 # #健康检查端点：用于监控系统确认API是否正常运行
 @app.get("/health", tags=["系统"])
