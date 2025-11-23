@@ -1,33 +1,32 @@
-# docker-compose.yml
+# docker-compose.yml 
 services:
   backend:
     build: .
-    container_name: makerhub-backend
+    container_name: makershub-backend
     ports:
       - "8000:8000"
     env_file: .env
     volumes:
       - ./assets/default-images:/docker-entrypoint-init.d/images
-      - ./app:/app/app  # 开发环境热重载
-      - ./logs:/app/logs  # 日志持久化
+      - ./app:/app/app
+      - ./logs:/app/logs
     depends_on:
-      mysql: # <-- 修改：依赖于 mysql
+      mysql:
         condition: service_healthy
       minio:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 3
+      retries: 12
     networks:
-      - makerhub-network
+      - makershub-network
 
-  # +++ 新增 MySQL 服务 +++
   mysql:
     image: mysql:8.0
-    container_name: makerhub-mysql
+    container_name: makershub-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -36,8 +35,8 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - ./data/mysql:/var/lib/mysql # 数据持久化
-      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro # 初始化脚本
+      - ./data/mysql:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
@@ -45,15 +44,16 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - makerhub-network
+      - makershub-network
 
   minio:
     image: minio/minio
-    container_name: makerhub-minio
+    container_name: makershub-minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-      MINIO_BROWSER_REDIRECT_URL: https://frp-dog.com:57286  #minio:9001的反向代理域名，用于网页前端访问的
+      MINIO_SERVER_URL: ${MINIO_PUBLIC_URL}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -68,7 +68,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./data/minio:/data
     networks:
-      - makerhub-network
+      - makershub-network
 
   minio-init:
     image: minio/mc
@@ -83,26 +83,32 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_AVATAR_BUCKET: ${MINIO_AVATAR_BUCKET}
+      MINIO_POSTER_BUCKET: ${MINIO_POSTER_BUCKET}
+      MINIO_PUBLIC_BUCKET: ${MINIO_PUBLIC_BUCKET}
     networks:
-      - makerhub-network
+      - makershub-network
     restart: on-failure
 
   admin-frontend:
     build: ./admin-frontend
-    container_name: makerhub-admin
+    container_name: makershub-admin
     user: "root"
     ports:
       - "3001:3000"
     volumes:
       - ./admin-frontend:/app
       - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
+      - WDS_SOCKET_PORT=0
     command: sh -c "chown -R root:root /app && npm start"
     depends_on:
       - backend
     restart: unless-stopped
     networks:
-      - makerhub-network
+      - makershub-network
 
 networks:
-  makerhub-network:
+  makershub-network:
     driver: bridge

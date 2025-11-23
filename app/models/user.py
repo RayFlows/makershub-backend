@@ -28,11 +28,14 @@ class User(Base, BaseMixin):
 
     映射到`users`表，存储用户基本信息、权限、状态等。
     在v0.2重构中，添加了`college`字段，并建立了与Task, Arrange, PublicityLink等模型的反向关系。
+    在v0.3扩充中，添加了`student_id`和`qq`字段，用于借用系统锚定。
 
     Attributes:
         id (int): 自增主键，数据库内部唯一标识。
         userid (str): 用户的微信openid，作为业务逻辑上的唯一标识符。
         maker_id (str, optional): 分配给用户的协会唯一标识符。
+        student_id (str, optional): [v0.3 新增] 学号，唯一，业务上借用物资必填。
+        qq (str, optional): [v0.3 新增] QQ号，联系方式。
         role (int): 用户权限级别。
         department (int): 用户所属部门的数字代码。
         real_name (str): 用户的真实姓名。
@@ -53,6 +56,12 @@ class User(Base, BaseMixin):
     id: Mapped[int] = mapped_column(primary_key=True, index=True, comment="自增主键ID")
     userid: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False, comment="微信openid，业务唯一标识")
     maker_id: Mapped[str | None] = mapped_column(String(128), index=True, comment="协会ID")
+    
+    # [v0.3 新增字段] 借用系统核心字段
+    # 注意：为了兼容旧数据，数据库层面允许 NULL，但业务逻辑会在借用时强制检查
+    student_id: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True, comment="学号")
+    qq: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="QQ号")
+
     role: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True, comment="权限级别: 0=普通, 1=干事, 2=部长")
     department: Mapped[int] = mapped_column(Integer, default=999, nullable=False, index=True, comment="所属部门ID")
     real_name: Mapped[str] = mapped_column(String(100), default="猫猫", nullable=False, comment="真实姓名")
@@ -68,9 +77,6 @@ class User(Base, BaseMixin):
     total_dutytime: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="总值班时长（分钟）")
 
     # --- [v0.2 新增] SQLAlchemy 反向关系 ---
-    # `back_populates` 参数指向另一端模型中对应的 relationship 名称，用于建立双向关系。
-    # `cascade` 和 `lazy` 等参数可用于更精细的控制，当前保持默认即可。
-    
     tasks: Mapped[List["Task"]] = relationship(back_populates="user")
     arrangements: Mapped[List["Arrange"]] = relationship(back_populates="user")
     publicity_links: Mapped[List["PublicityLink"]] = relationship(back_populates="user")

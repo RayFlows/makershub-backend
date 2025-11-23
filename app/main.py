@@ -43,7 +43,8 @@ from app.models import (
     event,
     publicity_link,
     task,
-    arrange  
+    arrange,
+    project  
 ) 
 
 # --- 路由导入 ---
@@ -192,28 +193,34 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.on_event("startup")
 async def startup_event():
     """
-    应用启动事件处理
-
-    在应用启动时执行初始化任务，包括：
-    1. 配置日志系统。
-    2. 初始化数据库，根据ORM模型创建所有尚不存在的表。
-    3. 启动后台定时任务。
+    应用启动事件处理：日志、数据库连接（带重试）、后台任务
     """
     setup_logging()
     logger.info("日志系统初始化完成。")
 
-    # --- 新的数据库初始化逻辑 ---
-    # 使用异步上下文管理器 `engine.begin()` 来获取一个连接和事务。
-    # 在这个块内，我们可以执行DDL（数据定义语言）命令，如创建表。
-    async with engine.begin() as conn:
-        # `Base.metadata.create_all`会检查数据库中是否存在所有继承自`Base`的模型所对应的表。
-        # 如果表不存在，它会自动生成并执行`CREATE TABLE`语句来创建它们。
-        # 注意：这不会处理表的修改或删除。在生产环境中，我们应使用Alembic这样的迁移工具
-        # 来管理数据库模式的演变，而不是依赖`create_all`。
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("数据库表结构已同步。")
-
-    # 启动后台清理任务
+    # === 数据库连接重试循环 ===
+    max_retries = 30  # 最大重试次数
+    retry_interval = 2  # 间隔秒数
+    
+    for i in range(max_retries):
+        try:
+            logger.info(f"正在尝试连接数据库... ({i+1}/{max_retries})")
+            async with engine.begin() as conn:
+                # 尝试创建表，这会触发实际的连接
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("数据库连接成功，表结构已同步。")
+            break  # 成功连接，跳出循环
+        except Exception as e:
+            logger.warning(f"数据库连接失败: {str(e)}")
+            if i < max_retries - 1:
+                logger.info(f"将在 {retry_interval} 秒后重试...")
+                await asyncio.sleep(retry_interval)
+            else:
+                logger.error("数据库连接重试耗尽，应用启动失败。")
+                # 这里不抛出异常，让应用保持运行状态以便查看日志，
+                # 但后续数据库操作会失败。
+    
+    # 启动后台任务
     asyncio.create_task(cleanup_incomplete_events_task())
     logger.info("后台清理任务已启动。")
 

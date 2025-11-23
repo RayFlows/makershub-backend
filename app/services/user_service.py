@@ -38,10 +38,13 @@ class UserService:
         return {
             "userid": user.userid,
             "maker_id": user.maker_id,
+            "student_id": user.student_id, # [v0.3 新增]
+            "qq": user.qq,                 # [v0.3 新增]
             "role": user.role,
             "department": user.department,
             "real_name": user.real_name,
             "phone_num": user.phone_num,
+            "college": user.college,       # 确保包含 college
             "motto": user.motto,
             "state": user.state,
             "profile_photo": user.profile_photo,
@@ -137,6 +140,7 @@ class UserService:
     async def update_user_profile(self, db: AsyncSession, user: User, update_data: dict) -> User:
         """
         通用更新用户资料的方法。
+        包含对特定字段的业务逻辑校验。
         
         Args:
             db: SQLAlchemy的异步数据库会话。
@@ -147,6 +151,21 @@ class UserService:
             更新并刷新后的User ORM实例。
         """
         try:
+            # 校验学号
+            if "student_id" in update_data:
+                student_id = update_data["student_id"]
+                # 如果传了空字符串，视为清除或不更新（视具体业务而定，这里假设允许更新为空）
+                if student_id:
+                    if not student_id.isdigit():
+                         raise ValueError("学号必须由纯数字组成")
+                    # 可以在这里添加长度校验，例如 if len(student_id) < 8: ...
+
+            # 校验QQ
+            if "qq" in update_data:
+                qq = update_data["qq"]
+                if qq and not qq.isdigit():
+                    raise ValueError("QQ号必须由纯数字组成")
+
             for field, value in update_data.items():
                 if hasattr(user, field):
                     setattr(user, field, value)
@@ -156,6 +175,10 @@ class UserService:
             await db.refresh(user)
             logger.info(f"用户资料更新成功: {user.userid}")
             return user
+        except ValueError as ve:
+            # 捕获校验错误，这里不回滚因为还没开始写库，但为了统一逻辑可以不处理直接抛出
+            logger.warning(f"用户更新数据校验失败: {ve}")
+            raise ve
         except Exception as e:
             await db.rollback()
             logger.error(f"更新用户资料失败: {e}", exc_info=True)

@@ -1,17 +1,13 @@
-#init.sh
+#!/bin/sh
+# docker/minio/init.sh
 
 # 等待 MinIO 服务启动
-# until curl -f http://minio:9000/minio/health/live; do
-#   echo "Waiting for MinIO to be ready..."
-#   sleep 2
-# done
 echo "Waiting for MinIO to be ready..."
-sleep 5  # 初始等待
+sleep 5
 
-# 创建桶
-# mc alias set myminio http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
 # 尝试设置别名并重试直到成功
-until mc alias set myminio http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD >/dev/null 2>&1
+# 注意：这里使用 docker-compose 传入的 MINIO_ROOT_USER 等变量
+until mc alias set myminio http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1
 do
   echo "Waiting for MinIO to be ready..."
   sleep 2
@@ -19,18 +15,20 @@ done
 
 echo "MinIO is ready. Creating buckets..."
 
-# mc mb myminio/$MINIO_BUCKET
-mc mb myminio/makerhub-avatars --ignore-existing
-mc mb myminio/makerhub-posters --ignore-existing
-mc mb myminio/makerhub-public --ignore-existing
+# 使用环境变量创建桶 (不再写死名字)
+# 这些变量来自 docker-compose.yml 的 environment 部分
+mc mb myminio/"$MINIO_AVATAR_BUCKET" --ignore-existing
+mc mb myminio/"$MINIO_POSTER_BUCKET" --ignore-existing
+mc mb myminio/"$MINIO_PUBLIC_BUCKET" --ignore-existing
 
 # 上传初始图片
-# mc cp /docker-entrypoint-init.d/images/* myminio/$MINIO_BUCKET/
-mc cp /docker-entrypoint-init.d/images/* myminio/makerhub-avatars/ || echo "No images to copy or path doesn't exist"
+echo "Uploading default images to $MINIO_AVATAR_BUCKET..."
+mc cp /docker-entrypoint-init.d/images/* myminio/"$MINIO_AVATAR_BUCKET"/ || echo "No images to copy or path doesn't exist"
 
 # 设置公共桶的访问策略
-mc anonymous set public myminio/makerhub-avatars
-mc anonymous set public myminio/makerhub-posters
-mc anonymous set public myminio/makerhub-public
+echo "Setting public access policies..."
+mc anonymous set public myminio/"$MINIO_AVATAR_BUCKET"
+mc anonymous set public myminio/"$MINIO_POSTER_BUCKET"
+mc anonymous set public myminio/"$MINIO_PUBLIC_BUCKET"
 
 echo "MinIO initialization complete!"

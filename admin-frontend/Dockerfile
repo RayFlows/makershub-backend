@@ -15,7 +15,7 @@
 # CMD ["nginx", "-g", "daemon off;"]
 
 # 开发阶段镜像，不做 build，只起 dev-server
-FROM node:16-alpine
+FROM node:18-alpine
 WORKDIR /app
 COPY package*.json ./
 RUN npm install          # 这一步必须有
