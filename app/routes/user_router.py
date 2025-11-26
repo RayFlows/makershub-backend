@@ -38,6 +38,7 @@ async def wx_login(request: WxLoginRequest, db: AsyncSession = Depends(get_db)):
             async with session.get(url) as response:
                 wx_response_text = await response.text()
                 wx_response = json.loads(wx_response_text)
+                logger.debug(f"微信API完整响应: {wx_response}")
 
         if 'errcode' in wx_response and wx_response['errcode'] != 0:
             error_msg = wx_response.get('errmsg', 'Unknown WeChat API error')
