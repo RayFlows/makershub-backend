@@ -4,7 +4,8 @@
 本模块负责处理所有与用户相关的API路由，包括微信登录和用户信息管理。
 [v2.0 SQLAlchemy 迁移版]
 """
-from fastapi import APIRouter, HTTPException, File, UploadFile, Depends
+from fastapi import APIRouter, HTTPException, File, UploadFile, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ import aiohttp
 import json
 
 router = APIRouter()
+security = HTTPBearer()
 user_service = UserService()
 
 class WxLoginRequest(BaseModel):
@@ -80,6 +82,10 @@ async def get_user_profile(current_user: User = Depends(AuthMiddleware.get_curre
             "real_name": user_data.get("real_name", ""),
             "role": user_data.get("role", 0),
             "phone_num": user_data.get("phone_num", ""),
+            "college": user_data.get("college", ""),
+            "student_id": user_data.get("student_id", ""),
+            "qq": user_data.get("qq", ""),
+            "grade": user_data.get("grade", ""),
             "state": user_data.get("state", 1),
             "profile_photo": user_data.get("profile_photo", ""),
             "motto": user_data.get("motto", ""),
@@ -94,11 +100,15 @@ class UserProfileUpdatePayload(BaseModel):
     real_name: Optional[str] = None
     phone_num: Optional[str] = None
     motto: Optional[str] = None
+    college: Optional[str] = None
+    student_id: Optional[str] = None
+    qq: Optional[str] = None
+    grade: Optional[str] = None
 
 class UserProfileUpdateRequest(BaseModel):
     data: UserProfileUpdatePayload
 
-@router.patch("/profile")
+@router.patch("/profile", dependencies=[Security(security)])
 async def update_user_profile(
     request: UserProfileUpdateRequest,
     db: AsyncSession = Depends(get_db),

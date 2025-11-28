@@ -40,6 +40,7 @@ class UserService:
             "maker_id": user.maker_id,
             "student_id": user.student_id, # [v0.3 新增]
             "qq": user.qq,                 # [v0.3 新增]
+            "grade": user.grade,           # [v0.2 新增]
             "role": user.role,
             "department": user.department,
             "real_name": user.real_name,
@@ -165,6 +166,12 @@ class UserService:
                 qq = update_data["qq"]
                 if qq and not qq.isdigit():
                     raise ValueError("QQ号必须由纯数字组成")
+
+            # 校验年级 (如果有) - [v0.3 新增]
+            if "grade" in update_data:
+                grade = update_data["grade"]
+                if grade and not grade.isdigit():
+                    raise ValueError("年级必须由纯数字组成 (例如 '2023')")
 
             for field, value in update_data.items():
                 if hasattr(user, field):

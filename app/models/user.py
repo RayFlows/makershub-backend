@@ -41,6 +41,7 @@ class User(Base, BaseMixin):
         real_name (str): 用户的真实姓名。
         phone_num (str, optional): 用户的手机号。
         college (str, optional): 用户所属学院，为项目部功能新增。
+        grade (str, optional): 用户所属年级。
         motto (str): 用户的个性签名。
         state (int): 用户账号状态。
         profile_photo (str, optional): 用户头像在MinIO中的对象名称/路径。
@@ -69,6 +70,7 @@ class User(Base, BaseMixin):
     
     # [v0.2 新增字段] 为项目部功能添加学院信息
     college: Mapped[str | None] = mapped_column(String(100), index=True, comment="学院")
+    grade: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True, comment="年级")
 
     motto: Mapped[str] = mapped_column(String(255), default="这个人很懒，什么都没写~", nullable=False, comment="个性签名")
     state: Mapped[int] = mapped_column(Integer, default=1, nullable=False, index=True, comment="账号状态: 0=封禁, 1=正常")
