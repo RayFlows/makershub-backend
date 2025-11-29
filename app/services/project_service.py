@@ -335,7 +335,7 @@ class ProjectService:
                 await db.rollback()
                 logger.error(f"添加成员失败: {e}", exc_info=True)
             raise e
-            
+
     async def remove_members(self, db: AsyncSession, project_id: str, leader_user: User, maker_ids: List[str]) -> List[dict]:
         """
         移除项目成员
@@ -415,4 +415,76 @@ class ProjectService:
             if not isinstance(e, (ValueError, PermissionError)):
                 await db.rollback()
                 logger.error(f"移除成员失败: {e}", exc_info=True)
+            raise e
+
+    async def get_review_list(self, db: AsyncSession, state: Optional[int]) -> List[dict]:
+        """
+        获取审核列表 (管理员/高级成员专用)
+        
+        Args:
+            state: 筛选的项目状态 (可选)
+        """
+        try:
+            # 构造查询
+            stmt = select(Project)
+            
+            # 如果传了 state，则进行筛选
+            if state is not None:
+                stmt = stmt.where(Project.state == state)
+            
+            # [关键] 预加载 Leader 和 Members，防止 N+1
+            stmt = stmt.options(
+                selectinload(Project.leader),
+                selectinload(Project.members).selectinload(ProjectMember.user)
+            ).order_by(Project.created_at.desc()) # 按时间倒序
+
+            result = await db.execute(stmt)
+            projects = result.scalars().all()
+
+            # 序列化结果
+            results_list = []
+            for p in projects:
+                # 1. 处理成员列表
+                members_data = []
+                for pm in p.members:
+                    if pm.user:
+                        members_data.append({
+                            "real_name": pm.user.real_name,
+                            "phone_num": pm.user.phone_num,
+                            "college": pm.user.college
+                        })
+
+                # 2. 构建详细字典 (匹配接口文档要求)
+                project_data = {
+                    "project_id": p.project_id,
+                    "project_name": p.project_name,
+                    "project_type": p.project_type,
+                    "description": p.description,
+                    
+                    "start_time": p.start_time.strftime("%Y-%m-%d %H:%M:%S") if p.start_time else None,
+                    "end_time": p.end_time.strftime("%Y-%m-%d %H:%M:%S") if p.end_time else None,
+                    
+                    # 负责人详细信息 (审核需要看联系方式)
+                    "leader_name": p.leader.real_name if p.leader else "",
+                    "leader_phone": p.leader.phone_num if p.leader else "",
+                    "leader_qq": p.leader.qq if p.leader else "",
+                    "college": p.leader.college if p.leader else "",
+                    
+                    "mentor_name": p.mentor_name,
+                    "mentor_phone": p.mentor_phone,
+                    "state": p.state,
+                    "is_recruiting": p.is_recruiting,
+                    "review": p.review,
+                    "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S") if p.created_at else None,
+                    "updated_at": p.updated_at.strftime("%Y-%m-%d %H:%M:%S") if p.updated_at else None,
+                    
+                    # 包含成员列表
+                    "members": members_data
+                }
+                results_list.append(project_data)
+
+            return results_list
+            
+        except Exception as e:
+            logger.error(f"获取审核列表失败: {e}", exc_info=True)
             raise e

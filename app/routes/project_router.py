@@ -5,14 +5,14 @@
 """
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security
+from fastapi import APIRouter, HTTPException, Depends, Security, Query
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from loguru import logger
 
 from app.core.database import get_db
-from app.core.auth import AuthMiddleware
+from app.core.auth import AuthMiddleware, require_permission_level
 from app.models.user import User
 from app.services.project_service import ProjectService
 
@@ -231,3 +231,31 @@ async def remove_project_members(
     except Exception as e:
         logger.error(f"移除成员接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="移除成员失败")
+
+@router.get("/list/review", dependencies=[Security(security)])
+async def get_project_review_list(
+    state: Optional[int] = Query(None, description="筛选特定状态 (如 0=待审核)"),
+    db: AsyncSession = Depends(get_db),
+    # [鉴权] 要求权限等级 >= 1 (干事及以上)
+    # 这会自动验证 token 并检查 user.role
+    current_user: User = Depends(require_permission_level(1))
+):
+    """
+    获取审核列表
+    
+    - 权限: 仅限协会高级成员 (Role >= 1)
+    - 筛选: 可通过 state 参数筛选，例如传 0 只看新申请。
+    - 返回: 包含项目完整信息、负责人联系方式及成员名单。
+    """
+    try:
+        projects = await project_service.get_review_list(db, state)
+        
+        return {
+            "code": 200,
+            "msg": "success",
+            "data": projects
+        }
+    except Exception as e:
+        logger.error(f"获取审核列表异常: {e}", exc_info=True)
+        # 这里的 500 会被前端捕获
+        raise HTTPException(status_code=500, detail="获取列表失败")
