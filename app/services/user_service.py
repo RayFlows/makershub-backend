@@ -274,3 +274,36 @@ class UserService:
         except Exception as e:
             logger.error(f"获取协会成员列表失败: {e}", exc_info=True)
             raise e
+
+    async def search_users_by_phone(self, db: AsyncSession, phone_keyword: str) -> list:
+        """
+        根据手机号模糊搜索用户 (用于前端实时联想)
+        只返回前10条匹配记录。
+        """
+        try:
+            # 如果搜索词为空，直接返回空列表
+            if not phone_keyword or not phone_keyword.strip():
+                return []
+            
+            # 使用 like 进行模糊匹配: %keyword%
+            # limit(10) 限制返回数量，防止搜索 "1" 时把全库都查出来
+            stmt = select(User).where(
+                User.phone_num.like(f"%{phone_keyword}%")
+            ).limit(10)
+            
+            result = await db.execute(stmt)
+            users = result.scalars().all()
+            
+            # 构造精简的返回数据
+            return [
+                {
+                    "real_name": u.real_name,
+                    "college": u.college,
+                    "phone_num": u.phone_num,
+                    "maker_id": u.maker_id  # 这是前端真正需要的“里子”
+                }
+                for u in users
+            ]
+        except Exception as e:
+            logger.error(f"搜索用户失败: {e}", exc_info=True)
+            raise e

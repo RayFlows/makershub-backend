@@ -4,7 +4,7 @@
 本模块负责处理所有与用户相关的API路由，包括微信登录和用户信息管理。
 [v2.0 SQLAlchemy 迁移版]
 """
-from fastapi import APIRouter, HTTPException, File, UploadFile, Depends, Security
+from fastapi import APIRouter, HTTPException, File, UploadFile, Depends, Security, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -160,6 +160,35 @@ async def upload_profile_photo(
     except Exception as e:
         logger.error(f"上传头像失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="上传头像失败")
+
+@router.get("/find-by-phonenum", dependencies=[Security(security)])
+async def find_users_by_phone(
+    phone_num: Optional[str] = Query(None, description="输入部分手机号进行搜索"),
+    db: AsyncSession = Depends(get_db),
+    # 需要鉴权，防止非登录用户恶意遍历手机号
+    _ = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    搜索用户 (实时联想)
+    
+    根据手机号模糊匹配，返回前10个符合条件的用户简要信息。
+    主要用于项目添加成员时的搜索补全。
+    """
+    try:
+        if not phone_num:
+            # 如果没有传参或传空，返回空列表
+            return {"code": 200, "msg": "success", "data": []}
+
+        users = await user_service.search_users_by_phone(db, phone_num)
+        
+        return {
+            "code": 200,
+            "msg": "success",
+            "data": users
+        }
+    except Exception as e:
+        logger.error(f"搜索用户接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="搜索失败")
 
 @router.get("/get-makers")
 async def get_all_makers(
