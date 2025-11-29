@@ -251,3 +251,87 @@ class ProjectService:
         except Exception as e:
             logger.error(f"获取项目详情失败: {e}", exc_info=True)
             raise e
+    
+    async def add_members(self, db: AsyncSession, project_id: str, leader_user: User, maker_ids: List[str]) -> List[dict]:
+        """
+        添加项目成员
+        
+        Args:
+            project_id: 项目业务ID
+            leader_user: 当前操作用户（必须是负责人）
+            maker_ids: 待添加成员的 maker_id 列表
+            
+        Returns:
+            List[dict]: 成功新添加的成员列表信息
+        """
+        try:
+            # 1. 获取项目并校验权限
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                raise ValueError("项目不存在")
+            
+            if project.leader_id != leader_user.id:
+                raise PermissionError("只有项目负责人可以添加成员")
+
+            if not maker_ids:
+                return []
+
+            # 2. 查询待添加的用户对象
+            stmt = select(User).where(User.maker_id.in_(maker_ids))
+            result = await db.execute(stmt)
+            candidate_users = result.scalars().all()
+            
+            if not candidate_users:
+                return []
+
+            candidate_user_ids = [u.id for u in candidate_users]
+
+            # 3. 查询这些用户中，哪些已经是成员了 (避免重复插入)
+            stmt_exist = select(ProjectMember.user_id).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id.in_(candidate_user_ids)
+            )
+            result_exist = await db.execute(stmt_exist)
+            existing_member_ids = set(result_exist.scalars().all())
+
+            # 4. 过滤并构建插入列表
+            members_to_add = []
+            added_users_info = []
+
+            for user in candidate_users:
+                # 规则A: 排除负责人自己
+                if user.id == project.leader_id:
+                    continue
+                # 规则B: 排除已经是成员的人
+                if user.id in existing_member_ids:
+                    continue
+
+                members_to_add.append(ProjectMember(
+                    project_id=project.id,
+                    user_id=user.id
+                ))
+                
+                # 收集返回数据
+                added_users_info.append({
+                    "real_name": user.real_name,
+                    "college": user.college,
+                    "phone_num": user.phone_num,
+                    "maker_id": user.maker_id
+                })
+
+            # 5. 执行插入
+            if members_to_add:
+                db.add_all(members_to_add)
+                await db.commit()
+                logger.info(f"项目 {project_id} 新增成员: {[u['maker_id'] for u in added_users_info]}")
+            
+            return added_users_info
+
+        except Exception as e:
+            if not isinstance(e, (ValueError, PermissionError)):
+                await db.rollback()
+                logger.error(f"添加成员失败: {e}", exc_info=True)
+            raise e

@@ -141,3 +141,51 @@ async def get_project_detail(
     except Exception as e:
         logger.error(f"查询项目详情异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取项目详情失败")
+
+class MemberIdItem(BaseModel):
+    """单个成员ID对象"""
+    maker_id: str
+
+class AddProjectMemberRequest(BaseModel):
+    """添加成员请求体"""
+    new_members: List[MemberIdItem]
+
+@router.post("/{project_id}/member/add", dependencies=[Security(security)])
+async def add_project_members(
+    project_id: str,
+    request: AddProjectMemberRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    添加项目成员
+    
+    - 鉴权: 仅项目负责人可操作
+    - 逻辑: 自动去重，忽略已存在的成员和负责人自己
+    """
+    try:
+        # 提取 maker_id 列表
+        maker_ids = [item.maker_id for item in request.new_members]
+        
+        added_members = await project_service.add_members(
+            db=db,
+            project_id=project_id,
+            leader_user=current_user,
+            maker_ids=maker_ids
+        )
+        
+        return {
+            "code": 200,
+            "msg": "成员添加成功",
+            "data": added_members
+        }
+        
+    except ValueError as ve:
+        # 项目不存在
+        raise HTTPException(status_code=404, detail=str(ve))
+    except PermissionError as pe:
+        # 权限不足 (不是负责人)
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"添加成员接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="添加成员失败")    
