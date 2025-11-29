@@ -259,3 +259,47 @@ async def get_project_review_list(
         logger.error(f"获取审核列表异常: {e}", exc_info=True)
         # 这里的 500 会被前端捕获
         raise HTTPException(status_code=500, detail="获取列表失败")
+
+class AuditProjectRequest(BaseModel):
+    """立项审核请求体"""
+    state: int = Field(..., description="审核结果: 1=通过(进行中), 2=驳回")
+    review: Optional[str] = Field(None, description="审核意见")
+
+@router.put("/{project_id}/action/audit", dependencies=[Security(security)])
+async def audit_project(
+    project_id: str,
+    request: AuditProjectRequest,
+    db: AsyncSession = Depends(get_db),
+    # [鉴权] 必须是干事及以上权限
+    current_user: User = Depends(require_permission_level(1))
+):
+    """
+    提交立项审核结果
+    
+    - **权限**: Role >= 1
+    - **约束**: state 只能为 1 或 2
+    """
+    try:
+        # 1. 参数校验
+        if request.state not in [1, 2]:
+            raise HTTPException(status_code=400, detail="审核状态无效，只能为 1(通过) 或 2(驳回)")
+
+        # 2. 调用服务
+        result = await project_service.audit_project(
+            db=db,
+            project_id=project_id,
+            state=request.state,
+            review=request.review
+        )
+        
+        return {
+            "code": 200,
+            "msg": "审核操作成功",
+            "data": result
+        }
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"审核接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="审核操作失败")

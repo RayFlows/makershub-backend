@@ -488,3 +488,45 @@ class ProjectService:
         except Exception as e:
             logger.error(f"获取审核列表失败: {e}", exc_info=True)
             raise e
+
+    async def audit_project(self, db: AsyncSession, project_id: str, state: int, review: Optional[str]) -> dict:
+        """
+        提交立项审核结果
+        
+        Args:
+            project_id: 项目业务ID
+            state: 新状态 (1=通过, 2=驳回)
+            review: 审核意见
+        """
+        try:
+            # 1. 查找项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                raise ValueError("项目不存在")
+            
+            # 2. 更新状态和意见
+            project.state = state
+            project.review = review
+            
+            # 如果审核不通过，通常不需要设置时间；如果通过，保持原有的时间即可。
+            # 这里逻辑很简单，直接更新字段
+            
+            db.add(project)
+            await db.commit()
+            await db.refresh(project)
+            
+            return {
+                "project_id": project.project_id,
+                "state": project.state,
+                "review": project.review
+            }
+            
+        except Exception as e:
+            # 如果不是 ValueError，说明是数据库错误，回滚
+            if not isinstance(e, ValueError):
+                await db.rollback()
+                logger.error(f"审核项目失败: {e}", exc_info=True)
+            raise e
