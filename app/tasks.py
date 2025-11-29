@@ -18,7 +18,7 @@ async def cleanup_incomplete_events_task():
     后台综合清理任务
     
     每隔 5 分钟执行一次，清理系统中的过期/僵尸数据。
-    该任务独立于API请求运行，因此需要手动创建和管理数据库会e话。
+    该任务独立于API请求运行，因此需要手动创建和管理数据库会话。
     它会无限循环，每隔5分钟执行一次清理操作。
     """
     event_service = EventService()
