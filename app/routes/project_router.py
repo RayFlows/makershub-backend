@@ -189,3 +189,45 @@ async def add_project_members(
     except Exception as e:
         logger.error(f"添加成员接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="添加成员失败")    
+
+class RemoveProjectMemberRequest(BaseModel):
+    """移除成员请求体"""
+    deleted_members: List[MemberIdItem]
+
+@router.delete("/{project_id}/member", dependencies=[Security(security)])
+async def remove_project_members(
+    project_id: str,
+    request: RemoveProjectMemberRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    移除项目成员
+    
+    - 鉴权: 仅项目负责人可操作
+    - 逻辑: 根据 maker_id 移除成员，忽略不在项目中的用户。
+    """
+    try:
+        # 提取 maker_id 列表
+        maker_ids = [item.maker_id for item in request.deleted_members]
+        
+        removed_members = await project_service.remove_members(
+            db=db,
+            project_id=project_id,
+            leader_user=current_user,
+            maker_ids=maker_ids
+        )
+        
+        return {
+            "code": 200,
+            "msg": "成员移除成功",
+            "data": removed_members
+        }
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"移除成员接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="移除成员失败")

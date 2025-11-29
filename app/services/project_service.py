@@ -6,7 +6,7 @@
 from typing import Optional, List
 from datetime import datetime
 import random
-from sqlalchemy import select, select, or_
+from sqlalchemy import select, select, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload # 使用 selectinload 预加载关系
 from loguru import logger
@@ -334,4 +334,85 @@ class ProjectService:
             if not isinstance(e, (ValueError, PermissionError)):
                 await db.rollback()
                 logger.error(f"添加成员失败: {e}", exc_info=True)
+            raise e
+            
+    async def remove_members(self, db: AsyncSession, project_id: str, leader_user: User, maker_ids: List[str]) -> List[dict]:
+        """
+        移除项目成员
+        
+        Args:
+            project_id: 项目业务ID
+            leader_user: 当前操作用户（必须是负责人）
+            maker_ids: 待移除成员的 maker_id 列表
+            
+        Returns:
+            List[dict]: 成功移除的成员列表信息
+        """
+        try:
+            # 1. 获取项目并校验权限
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                raise ValueError("项目不存在")
+            
+            if project.leader_id != leader_user.id:
+                raise PermissionError("只有项目负责人可以移除成员")
+
+            if not maker_ids:
+                return []
+
+            # 2. 查询待移除的用户对象
+            stmt_users = select(User).where(User.maker_id.in_(maker_ids))
+            result_users = await db.execute(stmt_users)
+            target_users = result_users.scalars().all()
+            
+            if not target_users:
+                return []
+
+            target_user_ids = [u.id for u in target_users]
+
+            # 3. 确认这些用户确实在成员列表中 (为了准确返回被删除的人，也为了避免无效删除)
+            # 我们先查出来“即将被删除的成员信息”，用于返回给前端
+            stmt_exist = select(User).join(
+                ProjectMember, User.id == ProjectMember.user_id
+            ).where(
+                ProjectMember.project_id == project.id,
+                User.id.in_(target_user_ids)
+            )
+            result_exist = await db.execute(stmt_exist)
+            users_to_remove = result_exist.scalars().all()
+            
+            if not users_to_remove:
+                return []
+                
+            ids_to_remove = [u.id for u in users_to_remove]
+
+            # 4. 执行删除操作
+            stmt_delete = delete(ProjectMember).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id.in_(ids_to_remove)
+            )
+            await db.execute(stmt_delete)
+            await db.commit()
+            
+            # 5. 构造返回数据
+            removed_info = [
+                {
+                    "real_name": u.real_name,
+                    "college": u.college,
+                    "phone_num": u.phone_num,
+                    "maker_id": u.maker_id
+                }
+                for u in users_to_remove
+            ]
+            
+            logger.info(f"项目 {project_id} 移除了成员: {[u['maker_id'] for u in removed_info]}")
+            return removed_info
+
+        except Exception as e:
+            if not isinstance(e, (ValueError, PermissionError)):
+                await db.rollback()
+                logger.error(f"移除成员失败: {e}", exc_info=True)
             raise e
