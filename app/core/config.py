@@ -25,11 +25,15 @@ class Settings(pydantic.ConfigDict):
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY")
     MINIO_PUBLIC_URL: str = os.getenv("MINIO_PUBLIC_URL")
+
+    # 项目结项材料桶
+    MINIO_MATERIAL_BUCKET: str = os.getenv("MINIO_MATERIAL_BUCKET", "makershub-materials")
     
     MINIO_BUCKETS: Dict[str, str] = {
         "AVATARS": os.getenv("MINIO_AVATAR_BUCKET", "makershub-avatars"),
         "POSTERS": os.getenv("MINIO_POSTER_BUCKET", "makershub-posters"),
-        "PUBLIC": os.getenv("MINIO_PUBLIC_BUCKET", "makershub-public")
+        "PUBLIC": os.getenv("MINIO_PUBLIC_BUCKET", "makershub-public"),
+        "MATERIALS": os.getenv("MINIO_MATERIAL_BUCKET", "makershub-materials"),
     }
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
 

@@ -20,15 +20,19 @@ echo "MinIO is ready. Creating buckets..."
 mc mb myminio/"$MINIO_AVATAR_BUCKET" --ignore-existing
 mc mb myminio/"$MINIO_POSTER_BUCKET" --ignore-existing
 mc mb myminio/"$MINIO_PUBLIC_BUCKET" --ignore-existing
+mc mb myminio/"$MINIO_MATERIAL_BUCKET" --ignore-existing
 
 # 上传初始图片
 echo "Uploading default images to $MINIO_AVATAR_BUCKET..."
 mc cp /docker-entrypoint-init.d/images/* myminio/"$MINIO_AVATAR_BUCKET"/ || echo "No images to copy or path doesn't exist"
 
+# 设置私有桶的访问策略
+mc anonymous set none myminio/"$MINIO_AVATAR_BUCKET"
+mc anonymous set none myminio/"$MINIO_POSTER_BUCKET"
+mc anonymous set none myminio/"$MINIO_MATERIAL_BUCKET"
+
 # 设置公共桶的访问策略
 echo "Setting public access policies..."
-mc anonymous set public myminio/"$MINIO_AVATAR_BUCKET"
-mc anonymous set public myminio/"$MINIO_POSTER_BUCKET"
 mc anonymous set public myminio/"$MINIO_PUBLIC_BUCKET"
 
 echo "MinIO initialization complete!"

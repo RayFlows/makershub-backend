@@ -1,10 +1,13 @@
 # app/core/storage.py
 
 import os
+from datetime import timedelta
 from minio import Minio
+from minio.error import S3Error
 from loguru import logger
 from io import BytesIO
 from app.core.config import settings
+from urllib.parse import urlparse
 
 class MinioClient:
     """
@@ -39,6 +42,23 @@ class MinioClient:
                 secure=settings.MINIO_SECURE,          # 是否使用HTTPS
                 http_client=None                       # 使用默认HTTP客户端
             )
+            # 2. 外部签名客户端 (仅用于生成预签名URL - 纯离线计算)
+            # 我们解析 MINIO_PUBLIC_URL 拿到域名 (例如 dev-s3.makershub.cn)
+            # 这样生成的签名才匹配浏览器的 Host Header
+            self.public_signer = None
+            if settings.MINIO_PUBLIC_URL:
+                parsed = urlparse(settings.MINIO_PUBLIC_URL)
+                public_endpoint = parsed.netloc  # 获取域名部分，如 dev-s3.makershub.cn
+                is_secure = (parsed.scheme == 'https')
+                
+                logger.info(f"Initializing Public Signer with endpoint: {public_endpoint}")
+                self.public_signer = Minio(
+                    public_endpoint,
+                    access_key=settings.MINIO_ACCESS_KEY,
+                    secret_key=settings.MINIO_SECRET_KEY,
+                    secure=is_secure
+                )
+
             # 存储桶字典引用
             self.buckets = settings.MINIO_BUCKETS
             logger.info(f"Connecting to Minio successfully")
@@ -48,72 +68,49 @@ class MinioClient:
 
     def get_file(self, filename: str, expire_seconds=3600, bucket_type="AVATARS") -> dict:
         """
-        获取文件的预签名URL
+        获取文件URL
         
-        为指定的文件生成一个临时的预签名URL，允许在不具有MinIO凭据的情况下访问文件。
-        
-        Args:
-            filename: 要获取的文件名
-            expire: URL的过期时间(秒)，默认为1小时(3600秒)
-            bucket_type: 存储桶类型，默认为AVATARS，可选值：AVATARS, POSTERS, PUBLIC
-            
-        Returns:
-            dict: 包含预签名URL的字典，格式为{"url": "预签名URL"}
-
-        注意：暂时注释掉了生成预签名URL的部分，改为直接生成可访问的URL。
-        该方法将根据配置生成一个可直接访问的URL，而不是预签名的URL。
-        这意味着生成的URL不需要额外的签名验证，可以直接访问。
-            
-        Raises:
-            S3Error: MinIO操作失败时可能抛出错误
+        策略：
+        1. PUBLIC 桶: 继续生成短的、永久的直接访问链接。
+        2. 其他所有桶 (MATERIALS, AVATARS, POSTERS): 全部生成带签名的、有效期的安全链接。
         """
         try:    
-            # 获取对应的存储桶名称
             bucket = self.buckets.get(bucket_type, self.buckets["AVATARS"])
 
-            # try:
-            #     expire_seconds = int(expire_seconds)
-            # except (TypeError, ValueError):
-            #     expire_seconds = 3600
+            # --- 策略 A: 纯公开桶 (PUBLIC) ---
+            if bucket_type == "PUBLIC":
+                if settings.MINIO_PUBLIC_URL:
+                    direct_url = f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{filename}"
+                else:
+                    protocol = "https" if settings.MINIO_SECURE else "http"
+                    direct_url = f"{protocol}://{settings.MINIO_ENDPOINT}/{bucket}/{filename}"
 
-            # # from datetime import timedelta
-            # expire_delta = timedelta(seconds=expire_seconds)
+                logger.info(f"生成公开文件直接URL: {direct_url}")
+                return {"url": direct_url}
 
-            # logger.debug(f"过期时间计算完成: {expire_seconds}秒")
-
-
-            # # 生成原始URL
-            # url = self.client.presigned_get_object(
-            #     bucket,
-            #     filename,
-            #     expires=expire_delta
-            # )
-
-            # 替换内网地址为公网地址（关键修改）
-            # if settings.MINIO_PUBLIC_URL:
-            #     endpoint = settings.MINIO_ENDPOINT
-            #     current_url = f"https://{endpoint}" if self.secure else f"http://{endpoint}"
-            #     public_url = url.replace(current_url, settings.MINIO_PUBLIC_URL.rstrip('/'))
-            #     logger.info(f"生成公网URL: {public_url}")
-            #     return {"url": public_url}
-            # else:
-            #     logger.info(f"生成的预签名URL: {url}")
-            #     return {"url": url}
-
-            # 生成直接访问URL（无签名）
-            if settings.MINIO_PUBLIC_URL:
-                # 使用公网地址
-                direct_url = f"{settings.MINIO_PUBLIC_URL.rstrip('/')}/{bucket}/{filename}"
+            # --- 策略 B: 私有桶 (MATERIALS, AVATARS, POSTERS) ---
             else:
-                # 使用内网地址构建直接URL
-                protocol = "https" if self.secure else "http"
-                direct_url = f"{protocol}://{settings.MINIO_ENDPOINT}/{bucket}/{filename}"
-
-            logger.info(f"生成直接访问URL: {direct_url}")
-            return {"url": direct_url}
+                expire_delta = timedelta(seconds=expire_seconds)
+                
+                # 使用 public_signer 生成签名 (这是我们刚才验证成功的逻辑)
+                if self.public_signer:
+                    url = self.public_signer.presigned_get_object(
+                        bucket,
+                        filename,
+                        expires=expire_delta
+                    )
+                    # logger.debug(f"生成私有签名URL: {url}") # 调试时可以打开，生产环境日志可能太多
+                    return {"url": url}
+                else:
+                    # 回退逻辑
+                    url = self.internal_client.presigned_get_object(
+                        bucket,
+                        filename,
+                        expires=expire_delta
+                    )
+                    return {"url": url}
                
         except S3Error as e:
-            # 记录错误并返回错误信息
             logger.error(f"获取文件URL失败: {str(e)}")
             return {"error": f"获取文件URL失败: {str(e)}"}
 

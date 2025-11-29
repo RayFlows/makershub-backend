@@ -86,6 +86,7 @@ services:
       MINIO_AVATAR_BUCKET: ${MINIO_AVATAR_BUCKET}
       MINIO_POSTER_BUCKET: ${MINIO_POSTER_BUCKET}
       MINIO_PUBLIC_BUCKET: ${MINIO_PUBLIC_BUCKET}
+      MINIO_MATERIAL_BUCKET: ${MINIO_MATERIAL_BUCKET}
     networks:
       - makershub-network
     restart: on-failure

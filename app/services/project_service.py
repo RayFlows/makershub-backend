@@ -4,15 +4,16 @@
 [v1.1] 创建项目返回结果增加负责人年级(grade)
 """
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
-from sqlalchemy import select, select, or_, delete
+from sqlalchemy import select, select, or_, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload # 使用 selectinload 预加载关系
 from loguru import logger
 
-from app.models.project import Project, ProjectMember
+from app.models.project import Project, ProjectMember, ProjectMaterial
 from app.models.user import User
+from app.core.storage import minio_client
 
 class ProjectService:
     """
@@ -574,4 +575,226 @@ class ProjectService:
             if not isinstance(e, (ValueError, PermissionError)):
                 await db.rollback()
                 logger.error(f"切换招募状态失败: {e}", exc_info=True)
+            raise e
+    
+    async def upload_material(self, db: AsyncSession, project_id: str, user: User, file_data: bytes, filename: str, content_type: str) -> dict:
+        """
+        上传结项材料
+        """
+        try:
+            # 1. 校验项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+            
+            if not project:
+                raise ValueError("项目不存在")
+            
+            if project.leader_id != user.id:
+                raise PermissionError("仅项目负责人可上传材料")
+                
+            # 状态检查：必须是 '进行中(1)' 或者 '驳回待修改(2)' (视具体业务而定，通常是进行中)
+            if project.state != 1: 
+                raise ValueError("当前项目状态不允许上传材料 (非进行中)")
+
+            # 2. 上传到 MinIO (使用 MATERIALS 私有桶)
+            # 命名策略: projects/{project_id}/{timestamp}_{filename}
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            safe_filename = f"projects/{project.project_id}/{timestamp}_{filename}"
+            
+            upload_success = minio_client.upload_file(
+                file_data,
+                safe_filename,
+                content_type=content_type,
+                bucket_type="MATERIALS" # [关键] 指定私有桶
+            )
+            
+            if not upload_success:
+                raise Exception("MinIO 上传失败")
+            
+            # 3. [验证环节] 立即生成一个预签名 URL 返回给前端，用于确认文件是否可访问
+            # 有效期 1 小时
+            url_res = minio_client.get_file(safe_filename, bucket_type="MATERIALS")
+            preview_url = url_res.get("url", "")
+
+            # 4. 写入数据库
+            new_material = ProjectMaterial(
+                project_id=project.id,
+                file_name=safe_filename,
+                file_type=content_type,
+                description=filename # 暂存原文件名
+            )
+            db.add(new_material)
+            await db.commit()
+            await db.refresh(new_material)
+            
+            return {
+                "id": new_material.id,
+                "file_name": new_material.file_name,
+                "original_name": filename,
+                "url": preview_url # [测试用] 此时你可以直接点击这个链接测试访问
+            }
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"上传材料失败: {e}", exc_info=True)
+            raise e
+
+    async def clear_project_materials(self, db: AsyncSession, project_id: str, user: User) -> int:
+        """
+        清空项目的所有结项材料 (用于重新提交前的清理)
+        """
+        try:
+            # 1. 校验项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+            
+            if not project:
+                raise ValueError("项目不存在")
+            
+            if project.leader_id != user.id:
+                raise PermissionError("仅项目负责人可操作")
+                
+            # 只有 '进行中(1)' 的项目可以清理材料，'待审核(3)' 或 '已结束' 的不能动
+            if project.state != 1:
+                raise ValueError("当前项目状态不允许清空材料")
+
+            # 2. 查询所有文件 (为了删 MinIO)
+            stmt_files = select(ProjectMaterial).where(ProjectMaterial.project_id == project.id)
+            result_files = await db.execute(stmt_files)
+            materials = result_files.scalars().all()
+            
+            if not materials:
+                return 0
+
+            # 3. 物理删除 MinIO 文件
+            # 即使某个文件删失败也不阻断流程，数据库一定要删干净
+            for mat in materials:
+                try:
+                    minio_client.client.remove_object(
+                        "makershub-materials", 
+                        mat.file_name
+                    )
+                except Exception as e:
+                    logger.warning(f"MinIO 删除残留文件失败: {mat.file_name}, error: {e}")
+
+            # 4. 数据库删除
+            stmt_del = delete(ProjectMaterial).where(ProjectMaterial.project_id == project.id)
+            await db.execute(stmt_del)
+            await db.commit()
+            
+            logger.info(f"项目 {project_id} 材料已清空，共删除 {len(materials)} 个文件")
+            return len(materials)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"清空材料失败: {e}", exc_info=True)
+            raise e
+
+    async def submit_closure(self, db: AsyncSession, project_id: str, user: User, finish_description: str) -> dict:
+        """
+        提交结项申请
+        """
+        try:
+            # 1. 校验项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+            
+            if not project:
+                raise ValueError("项目不存在")
+                
+            if project.leader_id != user.id:
+                raise PermissionError("仅项目负责人可提交结项")
+            
+            if project.state != 1:
+                raise ValueError("当前项目状态无法提交结项")
+
+            # 2. [关键检查] 检查数据库中是否已存在该项目的文件记录
+            # 使用 func.count 进行统计
+            stmt_count = select(func.count()).select_from(ProjectMaterial).where(ProjectMaterial.project_id == project.id)
+            result_count = await db.execute(stmt_count)
+            count = result_count.scalar()
+            
+            if count == 0:
+                raise ValueError("请至少上传一份结项材料后再次提交")
+
+            # 3. 更新状态
+            project.state = 3 # 3=待结项审核
+            project.finish_description = finish_description
+            
+            db.add(project)
+            await db.commit()
+            await db.refresh(project)
+            
+            return {
+                "project_id": project.project_id,
+                "state": project.state,
+                "updated_at": project.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+        except Exception as e:
+            if not isinstance(e, (ValueError, PermissionError)):
+                await db.rollback()
+                logger.error(f"提交结项失败: {e}", exc_info=True)
+            raise e
+
+    async def cleanup_zombie_materials(self, db: AsyncSession) -> int:
+        """
+        [后台任务专用] 清理僵尸材料
+        
+        逻辑：
+        1. 筛选条件：
+           - 项目状态 = 1 (进行中，说明还没提交结项)
+           - 材料创建时间 < 当前时间 - 24小时 (说明用户上传后晾了一天没动)
+        2. 执行操作：
+           - 从 MinIO 物理删除
+           - 从数据库删除记录
+        """
+        try:
+            # 定义过期时间：24小时前
+            deadline = datetime.now() - timedelta(hours=24)
+            
+            # 构造查询：关联 Project 表，筛选符合条件的材料
+            stmt = select(ProjectMaterial).join(
+                Project, ProjectMaterial.project_id == Project.id
+            ).where(
+                Project.state == 1,
+                ProjectMaterial.created_at < deadline
+            )
+            
+            result = await db.execute(stmt)
+            zombies = result.scalars().all()
+            
+            if not zombies:
+                return 0
+                
+            count = 0
+            for mat in zombies:
+                # 1. 删 MinIO (容错处理，即使文件不在了也不影响删库)
+                try:
+                    minio_client.client.remove_object(
+                        "makershub-materials", # 对应的桶名
+                        mat.file_name
+                    )
+                except Exception as e:
+                    logger.warning(f"清理僵尸文件 MinIO 删除失败: {mat.file_name}, error: {e}")
+
+                # 2. 删 DB
+                await db.delete(mat)
+                count += 1
+            
+            # 注意：这里不需要 commit，因为 tasks.py 会在最外层统一 commit
+            # 但为了保险起见（防止 tasks 逻辑有变），service 层 flush 一下也可以
+            await db.flush()
+            
+            if count > 0:
+                logger.info(f"后台任务：已清理 {count} 个项目部僵尸文件")
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"僵尸文件清理逻辑异常: {e}", exc_info=True)
+            # 抛出异常由 tasks.py 捕获，避免中断整个循环
             raise e

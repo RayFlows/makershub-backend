@@ -94,7 +94,7 @@ class ProjectMaterial(Base, BaseMixin):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False, comment="所属项目ID")
     
     file_name: Mapped[str] = mapped_column(String(512), nullable=False, comment="MinIO对象名")
-    file_type: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="文件类型")
+    file_type: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="文件类型")
     description: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="文件描述")
 
     # --- 关系定义 ---

@@ -5,7 +5,7 @@
 """
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security, Query
+from fastapi import APIRouter, HTTPException, Depends, Security, Query, UploadFile, File
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
@@ -341,3 +341,113 @@ async def toggle_recruit_status(
     except Exception as e:
         logger.error(f"切换招募状态接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="状态更新失败")
+
+class SubmitClosureRequest(BaseModel):
+    """提交结项请求体"""
+    finish_description: str = Field(..., description="结项总结")
+
+@router.post("/{project_id}/material/upload", dependencies=[Security(security)])
+async def upload_project_material(
+    project_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    上传结项材料 (支持测试私有访问)
+    
+    - **Bucket**: MATERIALS (私有)
+    - **Response**: 返回数据中包含 `url`，是一个带有签名的临时链接。
+    """
+    try:
+        # 读取文件内容
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="文件内容为空")
+            
+        result = await project_service.upload_material(
+            db=db,
+            project_id=project_id,
+            user=current_user,
+            file_data=contents,
+            filename=file.filename,
+            content_type=file.content_type
+        )
+        
+        return {
+            "code": 200,
+            "msg": "上传成功",
+            "data": result
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"上传材料接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="上传失败")
+
+@router.delete("/{project_id}/material/all", dependencies=[Security(security)])
+async def clear_all_materials(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    [原子性保障] 清空项目所有材料
+    
+    前端在点击“提交结项”时，应首先调用此接口，确保之前的失败上传/旧文件被清除，
+    然后再开始循环上传新文件。
+    """
+    try:
+        count = await project_service.clear_project_materials(
+            db=db,
+            project_id=project_id,
+            user=current_user
+        )
+        return {
+            "code": 200,
+            "msg": "材料已清空",
+            "data": {"deleted_count": count}
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"清空材料接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="清空失败")
+
+@router.put("/{project_id}/action/submit-closure", dependencies=[Security(security)])
+async def submit_closure(
+    project_id: str,
+    request: SubmitClosureRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    提交结项申请
+    
+    - **前置**: 必须先调用上传接口。
+    - **逻辑**: 如果没有文件记录，会报错 400。
+    """
+    try:
+        result = await project_service.submit_closure(
+            db=db,
+            project_id=project_id,
+            user=current_user,
+            finish_description=request.finish_description
+        )
+        
+        return {
+            "code": 200,
+            "msg": "结项申请已提交",
+            "data": result
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"提交结项接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="提交失败")
