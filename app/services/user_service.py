@@ -275,10 +275,14 @@ class UserService:
             logger.error(f"获取协会成员列表失败: {e}", exc_info=True)
             raise e
 
-    async def search_users_by_phone(self, db: AsyncSession, phone_keyword: str) -> list:
+    async def search_users_by_phone(self, db: AsyncSession, phone_keyword: str, exclude_user_id: int = None) -> list:
         """
         根据手机号模糊搜索用户 (用于前端实时联想)
         只返回前10条匹配记录。
+
+        Args:
+            phone_keyword: 手机号关键词
+            exclude_user_id: 需要排除的用户ID (通常是当前操作者/负责人)
         """
         try:
             # 如果搜索词为空，直接返回空列表
@@ -289,7 +293,12 @@ class UserService:
             # limit(10) 限制返回数量，防止搜索 "1" 时把全库都查出来
             stmt = select(User).where(
                 User.phone_num.like(f"%{phone_keyword}%")
-            ).limit(10)
+            )
+            
+            if exclude_user_id is not None:
+                stmt = stmt.where(User.id != exclude_user_id)
+
+            stmt = stmt.limit(10)
             
             result = await db.execute(stmt)
             users = result.scalars().all()

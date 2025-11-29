@@ -166,20 +166,21 @@ async def find_users_by_phone(
     phone_num: Optional[str] = Query(None, description="输入部分手机号进行搜索"),
     db: AsyncSession = Depends(get_db),
     # 需要鉴权，防止非登录用户恶意遍历手机号
-    _ = Depends(AuthMiddleware.get_current_user)
+    current_user: User = Depends(AuthMiddleware.get_current_user)
 ):
     """
     搜索用户 (实时联想)
     
     根据手机号模糊匹配，返回前10个符合条件的用户简要信息。
     主要用于项目添加成员时的搜索补全。
+    自动排除当前发起搜索的用户（即自己）。
     """
     try:
         if not phone_num:
             # 如果没有传参或传空，返回空列表
             return {"code": 200, "msg": "success", "data": []}
 
-        users = await user_service.search_users_by_phone(db, phone_num)
+        users = await user_service.search_users_by_phone(db, phone_num, exclude_user_id=current_user.id)
         
         return {
             "code": 200,
