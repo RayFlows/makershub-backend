@@ -111,3 +111,33 @@ async def view_my_projects(
     except Exception as e:
         logger.error(f"获取我的项目列表失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取项目列表失败")
+
+@router.get("/detail/{project_id}", dependencies=[Security(security)])
+async def get_project_detail(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    # 只需要鉴权，不需要用到 current_user 对象，但必须验证 token
+    _ = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    获取项目详情
+    
+    - **project_id**: 业务唯一编号 (例如 PJ2025...)
+    - **返回**: 项目基础信息 + 负责人详细信息 + 成员列表
+    """
+    try:
+        project_detail = await project_service.get_project_detail(db, project_id)
+        
+        if not project_detail:
+            raise HTTPException(status_code=404, detail="未找到指定项目")
+            
+        return {
+            "code": 200,
+            "message": "success",
+            "data": project_detail
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"查询项目详情异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取项目详情失败")

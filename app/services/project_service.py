@@ -183,3 +183,71 @@ class ProjectService:
         except Exception as e:
             logger.error(f"获取用户项目列表失败: {e}", exc_info=True)
             raise e
+
+    async def get_project_detail(self, db: AsyncSession, project_id: str) -> Optional[dict]:
+        """
+        根据 project_id 获取项目详情（包含负责人详细信息和成员列表）
+        """
+        try:
+            # 构造查询
+            # 1. 根据 project_id 过滤
+            # 2. 预加载 leader (User)
+            # 3. 预加载 members -> user (ProjectMember -> User)
+            stmt = select(Project).where(
+                Project.project_id == project_id
+            ).options(
+                selectinload(Project.leader),
+                selectinload(Project.members).selectinload(ProjectMember.user)
+            )
+
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                return None
+
+            # 构建符合接口文档要求的成员列表
+            members_list = []
+            for pm in project.members:
+                if pm.user:
+                    members_list.append({
+                        "real_name": pm.user.real_name,
+                        "phone_num": pm.user.phone_num,
+                        "college": pm.user.college,
+                        # 如果需要可以加更多字段，如 grade
+                    })
+
+            # 构建返回字典 (扁平化负责人信息)
+            return {
+                "project_id": project.project_id,
+                "project_name": project.project_name,
+                "project_type": project.project_type,
+                "description": project.description,
+                
+                "start_time": project.start_time.strftime("%Y-%m-%d %H:%M:%S") if project.start_time else None,
+                "end_time": project.end_time.strftime("%Y-%m-%d %H:%M:%S") if project.end_time else None,
+                
+                # --- 负责人信息 (扁平化) ---
+                "leader_name": project.leader.real_name if project.leader else "",
+                "leader_phone": project.leader.phone_num if project.leader else "",
+                "leader_qq": project.leader.qq if project.leader else "",
+                "college": project.leader.college if project.leader else "", # 负责人的学院
+                
+                # --- 其他信息 ---
+                "mentor_name": project.mentor_name,
+                "mentor_phone": project.mentor_phone,
+                "state": project.state,
+                "is_recruiting": project.is_recruiting,
+                "review": project.review,
+                "finish_description": project.finish_description,
+                "finish_review": project.finish_review,
+                "created_at": project.created_at.strftime("%Y-%m-%d %H:%M:%S") if project.created_at else None,
+                "updated_at": project.updated_at.strftime("%Y-%m-%d %H:%M:%S") if project.updated_at else None,
+                
+                # --- 成员列表 ---
+                "members": members_list
+            }
+
+        except Exception as e:
+            logger.error(f"获取项目详情失败: {e}", exc_info=True)
+            raise e
