@@ -61,7 +61,8 @@ from app.routes import (
     admin_router,
     admin_stuff_router,
     admin_site_router,
-    admin_user_router
+    admin_user_router,
+    project_router,
 )
 
 # 初始化FastAPI应用
@@ -323,6 +324,12 @@ app.include_router(
     arrange_router.router,  # 排班相关API路由
     prefix="/arrange",  # 路由前缀
     tags=["学年工作安排"]        # API文档分类标签
+)
+
+app.include_router(
+    project_router.router,  # 项目相关API路由
+    prefix="/project",     # 路由前缀
+    tags=["项目管理"]       # API文档分类标签
 )
 
 # #健康检查端点：用于监控系统确认API是否正常运行
