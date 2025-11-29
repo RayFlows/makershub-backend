@@ -530,3 +530,48 @@ class ProjectService:
                 await db.rollback()
                 logger.error(f"审核项目失败: {e}", exc_info=True)
             raise e
+
+    async def toggle_recruiting(self, db: AsyncSession, project_id: str, user: User, is_recruiting: bool) -> dict:
+        """
+        切换招募状态
+        
+        Args:
+            project_id: 项目业务ID
+            user: 当前操作用户
+            is_recruiting: 目标状态
+        """
+        try:
+            # 1. 查找项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                raise ValueError("项目不存在")
+            
+            # 2. 权限校验: 或者是负责人，或者是管理员(Role>=1)
+            is_leader = (project.leader_id == user.id)
+            is_admin = (user.role >= 1)
+            
+            if not (is_leader or is_admin):
+                raise PermissionError("权限不足: 仅限负责人或管理员操作")
+
+            # 3. 更新状态
+            project.is_recruiting = is_recruiting
+            
+            db.add(project)
+            await db.commit()
+            await db.refresh(project)
+            
+            logger.info(f"项目 {project_id} 招募状态更新为: {is_recruiting} (Operator: {user.userid})")
+            
+            return {
+                "project_id": project.project_id,
+                "is_recruiting": project.is_recruiting
+            }
+            
+        except Exception as e:
+            if not isinstance(e, (ValueError, PermissionError)):
+                await db.rollback()
+                logger.error(f"切换招募状态失败: {e}", exc_info=True)
+            raise e

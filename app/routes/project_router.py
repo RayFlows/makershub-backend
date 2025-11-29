@@ -303,3 +303,41 @@ async def audit_project(
     except Exception as e:
         logger.error(f"审核接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="审核操作失败")
+
+class ToggleRecruitRequest(BaseModel):
+    """切换招募状态请求体"""
+    is_recruiting: bool = Field(..., description="是否开启招募: true=开启, false=关闭")
+
+@router.put("/{project_id}/action/toggle-recruit", dependencies=[Security(security)])
+async def toggle_recruit_status(
+    project_id: str,
+    request: ToggleRecruitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    切换项目招募状态
+    
+    - 权限: 项目负责人 OR 管理员(Role>=1)
+    """
+    try:
+        result = await project_service.toggle_recruiting(
+            db=db,
+            project_id=project_id,
+            user=current_user,
+            is_recruiting=request.is_recruiting
+        )
+        
+        return {
+            "code": 200,
+            "msg": "状态更新成功",
+            "data": result
+        }
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"切换招募状态接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="状态更新失败")
