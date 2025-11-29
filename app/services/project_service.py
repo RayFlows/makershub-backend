@@ -68,7 +68,7 @@ class ProjectService:
             "updated_at": project.updated_at.isoformat() if project.updated_at else None
         }
 
-    async def create_project(self, db: AsyncSession, project_data: dict, leader: User, member_phones: List[str]) -> dict:
+    async def create_project(self, db: AsyncSession, project_data: dict, leader: User, member_maker_ids: List[str]) -> dict:
         """
         创建新项目
         
@@ -76,12 +76,16 @@ class ProjectService:
             db: 数据库会话
             project_data: 包含项目基础信息的字典
             leader: 当前登录用户（项目负责人）
-            member_phones: 初始成员的手机号列表
+            member_maker_ids: 初始成员的 maker_id 列表
             
         Returns:
             创建成功的项目信息字典
         """
         try:
+            # [新增校验] 检查负责人是否把自己加进了成员列表
+            if leader.maker_id in member_maker_ids:
+                # 直接抛出错误，中断流程，防止后续的数据库查询导致 Session 冲突
+                raise ValueError("项目负责人已自动包含在项目中，请勿将其添加到成员列表。")
             # 1. 生成业务ID
             pj_id = self._generate_project_id()
             
@@ -97,13 +101,14 @@ class ProjectService:
             await db.flush() 
             
             # 3. 处理初始成员 (如果有)
-            if member_phones:
-                # 批量查询手机号对应的用户
-                stmt = select(User).where(User.phone_num.in_(member_phones))
+            if member_maker_ids:
+                # 使用 maker_id 查询用户
+                stmt = select(User).where(User.maker_id.in_(member_maker_ids))
                 result = await db.execute(stmt)
                 users_found = result.scalars().all()
                 
                 members_to_add = []
+                found_maker_ids = []
                 found_phones = []
                 
                 for user in users_found:
@@ -114,13 +119,14 @@ class ProjectService:
                         project_id=new_project.id,
                         user_id=user.id
                     ))
+                    found_maker_ids.append(user.maker_id)
                     found_phones.append(user.phone_num)
                 
                 if members_to_add:
                     db.add_all(members_to_add)
-                    logger.info(f"项目 {pj_id} 添加了 {len(members_to_add)} 名初始成员。手机号: {found_phones}")
+                    logger.info(f"项目 {pj_id} 添加了 {len(members_to_add)} 名初始成员。手机号: {found_phones}，IDs: {found_maker_ids}")
                 else:
-                    logger.info(f"项目 {pj_id} 未找到匹配的成员手机号。")
+                    logger.info(f"项目 {pj_id} 未找到匹配的成员手机号或IDs。")
 
             # 4. 提交事务
             await db.commit()
@@ -138,6 +144,9 @@ class ProjectService:
                 "data": self._project_to_dict(new_project)
             }
             
+        except ValueError as ve:
+            # 捕获业务逻辑错误，重新抛出给 Router 处理
+            raise ve    
         except Exception as e:
             await db.rollback()
             logger.error(f"创建项目失败: {e}", exc_info=True)

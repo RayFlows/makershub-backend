@@ -37,7 +37,7 @@ class ProjectCreateRequest(BaseModel):
     mentor_phone: Optional[str] = Field(None, description="指导老师电话")
     is_recruiting: bool = Field(False, description="是否开放招募")
     
-    member_phones: List[str] = Field(default=[], description="初始成员手机号列表")
+    member_maker_ids: List[str] = Field(default=[], description="初始成员MakerID列表")
 
     class Config:
         json_schema_extra = {
@@ -50,7 +50,7 @@ class ProjectCreateRequest(BaseModel):
                 "mentor_name": "张教授",
                 "mentor_phone": "13800138000",
                 "is_recruiting": False,
-                "member_phones": ["13800138001", "13900139002"]
+                "member_maker_ids": ["MK20231101_123", "MK20231101_456"]
             }
         }
 
@@ -66,20 +66,24 @@ async def create_project(
     创建新项目
     
     - Header: 需要 Authorization Token
-    - Logic: 自动绑定当前用户为负责人(leader)，根据手机号查找并添加成员。
+    - Logic: 自动绑定当前用户为负责人(leader)，根据 member_maker_ids 查找并添加成员。
     - State: 初始状态默认为 0 (待审核)。
     """
     try:
-        # 提取基础数据，剔除 member_phones 单独处理
-        project_data = request.dict(exclude={"member_phones"})
-        member_phones = request.member_phones
+        # 提取基础数据，剔除 member_maker_ids 单独处理
+        project_data = request.dict(exclude={"member_maker_ids"})
+        member_maker_ids = request.member_maker_ids
         
         return await project_service.create_project(
             db=db,
             project_data=project_data,
             leader=current_user,
-            member_phones=member_phones
+            member_maker_ids=member_maker_ids
         )
+    except ValueError as ve:
+        # [新增] 专门捕获业务逻辑验证错误，返回 400 Bad Request
+        logger.warning(f"创建项目参数错误: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"创建项目接口异常: {e}", exc_info=True)
         # 区分已知错误和未知错误，这里暂统一报 500，Service层如果有特定逻辑可抛 HTTPException
