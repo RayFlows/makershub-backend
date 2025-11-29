@@ -6,8 +6,9 @@
 from typing import Optional, List
 from datetime import datetime
 import random
-from sqlalchemy import select
+from sqlalchemy import select, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload # 使用 selectinload 预加载关系
 from loguru import logger
 
 from app.models.project import Project, ProjectMember
@@ -44,7 +45,6 @@ class ProjectService:
             leader_name = project.leader.real_name
 
         return {
-            "id": project.id, # 内部ID
             "project_id": project.project_id, # 业务ID
             "project_name": project.project_name,
             "project_type": project.project_type,
@@ -141,4 +141,36 @@ class ProjectService:
         except Exception as e:
             await db.rollback()
             logger.error(f"创建项目失败: {e}", exc_info=True)
+            raise e
+    
+    async def get_my_projects(self, db: AsyncSession, user_id: int) -> List[dict]:
+        """
+        获取我参与的项目列表（我是负责人 OR 我是成员）
+        """
+        try:
+            # 构造查询：
+            # 1. 查询 Project 表
+            # 2. 左连接 ProjectMember 表 (为了检查我是不是成员)
+            # 3. 过滤条件: Project.leader_id == 我  OR  ProjectMember.user_id == 我
+            # 4. 预加载 leader 关系 (为了 _project_to_dict 能拿到负责人姓名和年级)
+            # 5. 去重 (distinct) 因为如果我又当负责人又把自己加进成员表，会查出两条
+            stmt = select(Project).outerjoin(
+                ProjectMember, Project.id == ProjectMember.project_id
+            ).where(
+                or_(
+                    Project.leader_id == user_id,
+                    ProjectMember.user_id == user_id
+                )
+            ).options(
+                selectinload(Project.leader)
+            ).distinct().order_by(Project.created_at.desc())
+
+            result = await db.execute(stmt)
+            projects = result.scalars().all()
+
+            # 转换为字典列表
+            return [self._project_to_dict(p) for p in projects]
+            
+        except Exception as e:
+            logger.error(f"获取用户项目列表失败: {e}", exc_info=True)
             raise e

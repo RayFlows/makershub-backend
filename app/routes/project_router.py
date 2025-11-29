@@ -84,3 +84,26 @@ async def create_project(
         logger.error(f"创建项目接口异常: {e}", exc_info=True)
         # 区分已知错误和未知错误，这里暂统一报 500，Service层如果有特定逻辑可抛 HTTPException
         raise HTTPException(status_code=500, detail="创建项目失败，请联系管理员")
+
+@router.get("/list/view-my", dependencies=[Security(security)])
+async def view_my_projects(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    获取我的项目列表
+    
+    返回当前用户参与的所有项目（无论是作为负责人还是作为成员）。
+    列表按创建时间倒序排列。
+    """
+    try:
+        projects = await project_service.get_my_projects(db, current_user.id)
+        
+        return {
+            "code": 200,
+            "message": "获取项目列表成功",
+            "data": projects
+        }
+    except Exception as e:
+        logger.error(f"获取我的项目列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取项目列表失败")
