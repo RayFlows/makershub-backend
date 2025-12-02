@@ -5,7 +5,7 @@
 """
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Security, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, Security, Query, UploadFile, File, Form
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
@@ -350,27 +350,32 @@ class SubmitClosureRequest(BaseModel):
 async def upload_project_material(
     project_id: str,
     file: UploadFile = File(...),
+    filename: Optional[str] = Form(None, description="原始文件名(用于修复微信小程序文件名乱码问题)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(AuthMiddleware.get_current_user)
 ):
     """
     上传结项材料 (支持测试私有访问)
     
-    - **Bucket**: MATERIALS (私有)
-    - **Response**: 返回数据中包含 `url`，是一个带有签名的临时链接。
+    - Bucket: MATERIALS (私有)
+    - Response: 返回数据中包含 `url`，是一个带有签名的临时链接。
+    - 特别说明: 微信小程序请在 formData 中携带 `filename` 参数，传入文件的原始名称，否则后端会保存为临时随机名。
     """
     try:
         # 读取文件内容
         contents = await file.read()
         if not contents:
             raise HTTPException(status_code=400, detail="文件内容为空")
+        
+         # [逻辑修改] 优先使用前端传来的 filename，如果没有，才用文件流里的 filename
+        real_filename = filename if filename else file.filename
             
         result = await project_service.upload_material(
             db=db,
             project_id=project_id,
             user=current_user,
             file_data=contents,
-            filename=file.filename,
+            filename=real_filename,
             content_type=file.content_type
         )
         
