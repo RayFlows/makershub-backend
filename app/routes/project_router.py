@@ -276,8 +276,8 @@ async def audit_project(
     """
     提交立项审核结果
     
-    - **权限**: Role >= 1
-    - **约束**: state 只能为 1 或 2
+    - 权限: Role >= 1
+    - 约束: state 只能为 1 或 2
     """
     try:
         # 1. 参数校验

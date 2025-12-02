@@ -215,7 +215,9 @@ class ProjectService:
                         "real_name": pm.user.real_name,
                         "phone_num": pm.user.phone_num,
                         "college": pm.user.college,
-                        # 如果需要可以加更多字段，如 grade
+                        "grade": pm.user.grade,         
+                        "student_id": pm.user.student_id,
+                        "maker_id": pm.user.maker_id 
                     })
 
             # 构建返回字典 (扁平化负责人信息)
@@ -232,6 +234,8 @@ class ProjectService:
                 "leader_name": project.leader.real_name if project.leader else "",
                 "leader_phone": project.leader.phone_num if project.leader else "",
                 "leader_qq": project.leader.qq if project.leader else "",
+                "leader_grade": project.leader.grade if project.leader else "",
+                "leader_student_id": project.leader.student_id if project.leader else "",
                 "college": project.leader.college if project.leader else "", # 负责人的学院
                 
                 # --- 其他信息 ---
