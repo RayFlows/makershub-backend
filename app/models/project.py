@@ -91,6 +91,7 @@ class ProjectMaterial(Base, BaseMixin):
     __tablename__ = "project_materials"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, comment="自增主键")
+    material_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True, comment="材料业务ID")
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False, comment="所属项目ID")
     
     file_name: Mapped[str] = mapped_column(String(512), nullable=False, comment="MinIO对象名")

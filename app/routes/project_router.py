@@ -150,7 +150,7 @@ class AddProjectMemberRequest(BaseModel):
     """添加成员请求体"""
     new_members: List[MemberIdItem]
 
-@router.post("/{project_id}/member/add", dependencies=[Security(security)])
+@router.post("/member/add/{project_id}", dependencies=[Security(security)])
 async def add_project_members(
     project_id: str,
     request: AddProjectMemberRequest,
@@ -194,7 +194,7 @@ class RemoveProjectMemberRequest(BaseModel):
     """移除成员请求体"""
     deleted_members: List[MemberIdItem]
 
-@router.delete("/{project_id}/member", dependencies=[Security(security)])
+@router.delete("/member/{project_id}", dependencies=[Security(security)])
 async def remove_project_members(
     project_id: str,
     request: RemoveProjectMemberRequest,
@@ -265,7 +265,7 @@ class AuditProjectRequest(BaseModel):
     state: int = Field(..., description="审核结果: 1=通过(进行中), 2=驳回")
     review: Optional[str] = Field(None, description="审核意见")
 
-@router.put("/{project_id}/action/audit", dependencies=[Security(security)])
+@router.put("/action/audit/{project_id}", dependencies=[Security(security)])
 async def audit_project(
     project_id: str,
     request: AuditProjectRequest,
@@ -308,7 +308,7 @@ class ToggleRecruitRequest(BaseModel):
     """切换招募状态请求体"""
     is_recruiting: bool = Field(..., description="是否开启招募: true=开启, false=关闭")
 
-@router.put("/{project_id}/action/toggle-recruit", dependencies=[Security(security)])
+@router.put("/action/toggle-recruit/{project_id}", dependencies=[Security(security)])
 async def toggle_recruit_status(
     project_id: str,
     request: ToggleRecruitRequest,
@@ -346,7 +346,7 @@ class SubmitClosureRequest(BaseModel):
     """提交结项请求体"""
     finish_description: str = Field(..., description="结项总结")
 
-@router.post("/{project_id}/material/upload", dependencies=[Security(security)])
+@router.post("/material/upload/{project_id}", dependencies=[Security(security)])
 async def upload_project_material(
     project_id: str,
     file: UploadFile = File(...),
@@ -386,8 +386,39 @@ async def upload_project_material(
     except Exception as e:
         logger.error(f"上传材料接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="上传失败")
+    
+@router.delete("/material/{material_id}", dependencies=[Security(security)])
+async def delete_project_material(
+    material_id: str, 
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    删除单个结项材料
 
-@router.delete("/{project_id}/material/all", dependencies=[Security(security)])
+    - 场景: 用户上传错了某个文件，手动点击删除。
+    - 参数: material_id (上传接口返回的 id)
+    - material_id: 文件的业务唯一ID (字符串, 如 MAT2025...)
+    """
+    try:
+        await project_service.delete_material(
+            db=db,
+            material_id=material_id,
+            user=current_user
+        )
+        return {
+            "code": 200,
+            "msg": "文件删除成功"
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"删除材料接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="删除失败")
+
+@router.delete("/material/all/{project_id}", dependencies=[Security(security)])
 async def clear_all_materials(
     project_id: str,
     db: AsyncSession = Depends(get_db),
@@ -418,7 +449,7 @@ async def clear_all_materials(
         logger.error(f"清空材料接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="清空失败")
 
-@router.put("/{project_id}/action/submit-closure", dependencies=[Security(security)])
+@router.put("/action/submit-closure/{project_id}", dependencies=[Security(security)])
 async def submit_closure(
     project_id: str,
     request: SubmitClosureRequest,
@@ -451,3 +482,58 @@ async def submit_closure(
     except Exception as e:
         logger.error(f"提交结项接口异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="提交失败")
+    
+class ProjectUpdateRequest(BaseModel):
+    """
+    更新立项申请请求体
+    所有字段均为选填，仅更新提供的字段。
+    """
+    project_name: Optional[str] = Field(None, description="项目名称")
+    project_type: Optional[int] = Field(None, description="项目类型: 0=个人, 1=比赛")
+    description: Optional[str] = Field(None, description="项目详细描述")
+    start_time: Optional[datetime] = Field(None, description="预计开始时间")
+    end_time: Optional[datetime] = Field(None, description="预计结束时间")
+    mentor_name: Optional[str] = Field(None, description="指导老师姓名")
+    mentor_phone: Optional[str] = Field(None, description="指导老师电话")
+    is_recruiting: Optional[bool] = Field(None, description="是否开放招募")
+
+@router.put("/update/{project_id}", dependencies=[Security(security)])
+async def update_project_application(
+    project_id: str,
+    request: ProjectUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(AuthMiddleware.get_current_user)
+):
+    """
+    更新项目立项申请
+    
+    - 前置条件: 项目状态必须为 0(待审核) 或 2(已驳回)。
+    - 副作用: 更新成功后，项目状态会自动重置为 0(待审核)。
+    """
+    try:
+        # exclude_unset=True 确保只提取用户实际传了的字段
+        update_data = request.dict(exclude_unset=True)
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="未提供任何更新内容")
+
+        result = await project_service.update_project(
+            db=db,
+            project_id=project_id,
+            user=current_user,
+            update_data=update_data
+        )
+        
+        return {
+            "code": 200,
+            "msg": "项目创建申请已更新",
+            "data": result
+        }
+        
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        logger.error(f"更新项目接口异常: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="更新失败")

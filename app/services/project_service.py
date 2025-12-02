@@ -576,6 +576,15 @@ class ProjectService:
                 await db.rollback()
                 logger.error(f"切换招募状态失败: {e}", exc_info=True)
             raise e
+        
+    def _generate_material_id(self) -> str:
+        """
+        生成材料业务ID: MAT + 时间戳 + 随机数
+        """
+        now = datetime.now()
+        timestamp = now.strftime("%Y%m%d%H%M%S%f")[:-3]
+        random_suffix = f"{random.randint(0,999):03d}"
+        return f"MAT{timestamp}_{random_suffix}"
     
     async def upload_material(self, db: AsyncSession, project_id: str, user: User, file_data: bytes, filename: str, content_type: str) -> dict:
         """
@@ -618,8 +627,11 @@ class ProjectService:
             preview_url = url_res.get("url", "")
 
             # 4. 写入数据库
+            mat_id = self._generate_material_id() # 生成业务ID
+
             new_material = ProjectMaterial(
                 project_id=project.id,
+                material_id=mat_id,
                 file_name=safe_filename,
                 file_type=content_type,
                 description=filename # 暂存原文件名
@@ -629,7 +641,7 @@ class ProjectService:
             await db.refresh(new_material)
             
             return {
-                "id": new_material.id,
+                "material_id": new_material.material_id,
                 "file_name": new_material.file_name,
                 "original_name": filename,
                 "url": preview_url # [测试用] 此时你可以直接点击这个链接测试访问
@@ -638,6 +650,51 @@ class ProjectService:
         except Exception as e:
             await db.rollback()
             logger.error(f"上传材料失败: {e}", exc_info=True)
+            raise e
+        
+    async def delete_material(self, db: AsyncSession, material_id: str, user: User) -> bool:
+        """
+        删除单条项目材料 (根据业务ID)
+        """
+        try:
+            # 1. 根据 material_id 查找材料记录
+            stmt = select(ProjectMaterial).where(ProjectMaterial.material_id == material_id)
+            result = await db.execute(stmt)
+            material = result.scalar_one_or_none()
+            
+            if not material:
+                raise ValueError("文件记录不存在")
+            
+            # 2. 查找关联项目以验证权限
+            stmt_proj = select(Project).where(Project.id == material.project_id)
+            result_proj = await db.execute(stmt_proj)
+            project = result_proj.scalar_one_or_none()
+            
+            if not project or project.leader_id != user.id:
+                raise PermissionError("仅项目负责人可删除文件")
+            if project.state != 1:
+                raise ValueError("当前项目状态不允许删除文件")
+
+            # 3. 从 MinIO 移除
+            try:
+                minio_client.client.remove_object(
+                    "makershub-materials", 
+                    material.file_name
+                )
+                logger.info(f"MinIO 文件删除成功: {material.file_name}")
+            except Exception as minio_e:
+                # 即使 MinIO 删失败（比如文件本来就不在），也要继续删数据库，保证数据一致性
+                logger.warning(f"MinIO 文件删除异常（可能已丢失）: {minio_e}")
+
+            # 4. 删 DB
+            await db.delete(material)
+            await db.commit()
+            
+            return True
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"删除材料失败: {e}", exc_info=True)
             raise e
 
     async def clear_project_materials(self, db: AsyncSession, project_id: str, user: User) -> int:
@@ -738,6 +795,54 @@ class ProjectService:
             if not isinstance(e, (ValueError, PermissionError)):
                 await db.rollback()
                 logger.error(f"提交结项失败: {e}", exc_info=True)
+            raise e
+        
+    async def update_project(self, db: AsyncSession, project_id: str, user: User, update_data: dict) -> dict:
+        """
+        更新项目立项信息
+        """
+        try:
+            # 1. 查找项目
+            stmt = select(Project).where(Project.project_id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalar_one_or_none()
+
+            if not project:
+                raise ValueError("项目不存在")
+            
+            # 2. 权限校验
+            if project.leader_id != user.id:
+                raise PermissionError("仅项目负责人可修改申请")
+            
+            # 3. 状态校验: 只有 0(待审核) 或 2(已驳回) 可以改
+            # 1(进行中), 3(待结项), 4(已结束) 都不允许改基础信息
+            if project.state not in [0, 2]:
+                raise ValueError("当前项目状态不允许修改立项信息")
+
+            # 4. 执行更新
+            for field, value in update_data.items():
+                if hasattr(project, field):
+                    setattr(project, field, value)
+            
+            # 5. [关键] 重置状态为 0 (待审核)
+            # 无论是修改了草稿，还是修改了被驳回的项目，都需要管理员重新审核
+            project.state = 0
+            
+            # 如果之前有审核意见，建议清空吗？通常保留历史意见给管理员参考比较好，这里暂时不自动清空 review
+            
+            db.add(project)
+            await db.commit()
+            await db.refresh(project)
+            
+            logger.info(f"项目 {project_id} 立项信息已更新并重置为待审核状态")
+            
+            # 返回用户修改的那些字段
+            return update_data
+
+        except Exception as e:
+            if not isinstance(e, (ValueError, PermissionError)):
+                await db.rollback()
+                logger.error(f"更新项目失败: {e}", exc_info=True)
             raise e
 
     async def cleanup_zombie_materials(self, db: AsyncSession) -> int:
