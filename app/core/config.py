@@ -39,8 +39,12 @@ class Settings(pydantic.ConfigDict):
 
     # --- JWT 安全设置 ---
     SECRET_KEY: str = os.getenv("SECRET_KEY")
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY")
     ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
+
+    # --- 数据库设置 ---
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
 
     # --- 权限等级定义 ---
     PERMISSION_LEVELS: Dict[str, int] = {

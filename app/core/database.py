@@ -10,9 +10,10 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 from loguru import logger
+from app.core.config import settings
 
 # 从环境变量中获取数据库连接URL，这是连接数据库的唯一凭证
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = settings.DATABASE_URL
 
 # --- 数据库引擎 (Engine) ---
 # 创建一个全局的异步数据库引擎实例。
@@ -21,7 +22,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 #            生产环境中应设置为False，以避免泄露敏感信息和性能开销。
 # pool_pre_ping=True: 在每次从连接池中获取连接时，会先发送一个简单的 "ping" 查询来检查连接是否仍然有效。
 #                    这能有效防止因数据库服务器断开空闲连接而导致的 "MySQL server has gone away" 错误。
-engine = create_async_engine(DATABASE_URL, echo=True, pool_pre_ping=True)
+engine = create_async_engine(DATABASE_URL, echo=settings.DEBUG, pool_pre_ping=True)
 
 
 # --- 数据库会话工厂 (Session Factory) ---
